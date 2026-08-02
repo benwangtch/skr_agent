@@ -3,6 +3,7 @@
 from .assembly import Mesh, build_mesh
 from .copilot import build_copilot
 from .mesh import AgentRegistry, agent_as_tool, agents_as_toolserver
+from .principals import service_principal, user_principal
 from .protocol import (
     AgentError,
     AgentRequest,
@@ -23,6 +24,8 @@ __all__ = [
     "AgentRegistry",
     "agent_as_tool",
     "agents_as_toolserver",
+    "service_principal",
+    "user_principal",
     "AgentRequest",
     "AgentResponse",
     "AgentSpec",

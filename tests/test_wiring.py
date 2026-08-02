@@ -10,21 +10,24 @@ from pathlib import Path
 
 import pytest
 
-from skr_agent import Principal, build_copilot, build_mesh
+from skr_agent import build_copilot, build_mesh
+from skr_agent.principals import service_principal, user_principal
 from skr_agent.protocol import AgentRequest, Budget
 from skr_agent.runtime import ToolContext, _extract_json
+from skr_agent.wiki.authz import EXEC_NAMESPACE
 
 ROOT = Path(__file__).resolve().parent.parent
-ALICE = Principal(
-    subject="alice",
-    division="supply",
-    roles=frozenset({"wiki.reader", "wiki.writer"}),
-)
+ALICE = user_principal("alice", "supply", roles={"wiki.reader", "wiki.writer"})
 
 
 @pytest.fixture
 def mesh():
     return build_mesh(fixtures=ROOT / "fixtures", project_root=ROOT)
+
+
+@pytest.fixture
+def mesh_with_wiki_agent():
+    return build_mesh(fixtures=ROOT / "fixtures", project_root=ROOT, with_wiki_agent=True)
 
 
 def options_for(agent, principal=ALICE, budget=None):
@@ -36,16 +39,24 @@ def options_for(agent, principal=ALICE, budget=None):
 
 
 class TestReportAgentWiring:
-    def test_registry_exposes_all_three_capabilities(self, mesh):
+    def test_registry_exposes_the_report_agent_by_default(self, mesh):
         names = {s.name for s in mesh.registry.list()}
-        assert names == {"wiki_ask", "wiki_publish", "wiki_report"}
+        assert names == {"wiki_report"}
+        assert mesh.coordinator is None
 
-    def test_report_agent_reaches_wiki_only_through_the_coordinator(self, mesh):
+    def test_wiki_agent_is_opt_in(self, mesh_with_wiki_agent):
+        names = {s.name for s in mesh_with_wiki_agent.registry.list()}
+        assert names == {"wiki_report", "wiki_ask"}
+        assert mesh_with_wiki_agent.coordinator is not None
+
+    def test_report_agent_reaches_the_wiki_only_through_its_own_tools(self, mesh):
         options, _ = options_for(mesh.report_agent)
-        wiki_tools = [t for t in options.allowed_tools if "wiki" in t]
-        assert sorted(wiki_tools) == ["mcp__wiki__wiki_ask", "mcp__wiki__wiki_publish"]
-        # No direct database-shaped tools leak through.
-        assert not any("page" in t or "namespace" in t for t in options.allowed_tools)
+        wiki_tools = sorted(t for t in options.allowed_tools if "wiki" in t)
+        assert wiki_tools == [
+            "mcp__wiki__wiki_read_page",
+            "mcp__wiki__wiki_search",
+            "mcp__wiki__wiki_write_page",
+        ]
 
     def test_report_agent_has_bom_and_news_tools(self, mesh):
         options, _ = options_for(mesh.report_agent)
@@ -66,11 +77,12 @@ class TestReportAgentWiring:
         investigator = options.agents["company-investigator"]
         assert set(investigator.tools) <= set(options.allowed_tools)
 
-    def test_subagent_cannot_publish(self, mesh):
+    def test_subagent_cannot_write(self, mesh):
         """Only the top-level agent writes; investigators are read-only."""
         options, _ = options_for(mesh.report_agent)
         investigator = options.agents["company-investigator"]
-        assert "mcp__wiki__wiki_publish" not in investigator.tools
+        assert "mcp__wiki__wiki_write_page" not in investigator.tools
+        assert "mcp__wiki__wiki_search" in investigator.tools
 
 
 class TestBudgetPropagation:
@@ -96,24 +108,49 @@ class TestBudgetPropagation:
 
 
 class TestCopilotWiring:
-    def test_copilot_sees_every_registered_feature_as_one_tool(self, mesh):
-        copilot = build_copilot(mesh.registry)
+    def test_copilot_mounts_wiki_tools_directly_plus_registered_agents(self, mesh):
+        copilot = build_copilot(mesh.registry, wiki_backend=mesh.backend, wiki_authz=mesh.authz)
         options, _ = options_for(copilot)
-        assert set(options.allowed_tools) == {
-            "mcp__features__wiki_ask",
-            "mcp__features__wiki_publish",
-            "mcp__features__wiki_report",
-        }
+        assert "mcp__wiki__wiki_search" in options.allowed_tools
+        assert "mcp__wiki__wiki_read_page" in options.allowed_tools
+        assert "mcp__features__wiki_report" in options.allowed_tools
+
+    def test_copilot_wiki_write_is_off_by_default(self, mesh):
+        copilot = build_copilot(mesh.registry, wiki_backend=mesh.backend, wiki_authz=mesh.authz)
+        options, _ = options_for(copilot)
+        assert "mcp__wiki__wiki_write_page" not in options.allowed_tools
+
+    def test_copilot_wiki_write_can_be_turned_on(self, mesh):
+        copilot = build_copilot(
+            mesh.registry, wiki_backend=mesh.backend, wiki_authz=mesh.authz, wiki_writable=True
+        )
+        options, _ = options_for(copilot)
+        assert "mcp__wiki__wiki_write_page" in options.allowed_tools
 
     def test_copilot_loads_nothing_from_disk(self, mesh):
-        copilot = build_copilot(mesh.registry)
+        copilot = build_copilot(mesh.registry, wiki_backend=mesh.backend, wiki_authz=mesh.authz)
         options, _ = options_for(copilot)
         assert options.setting_sources == []
 
     def test_copilot_has_no_builtin_file_or_shell_tools(self, mesh):
-        copilot = build_copilot(mesh.registry)
+        copilot = build_copilot(mesh.registry, wiki_backend=mesh.backend, wiki_authz=mesh.authz)
         options, _ = options_for(copilot)
         assert not any(t in options.allowed_tools for t in ("Bash", "Write", "Edit", "Read"))
+
+
+class TestPrincipalConstructors:
+    def test_service_principal_can_read_and_write_exec(self, mesh):
+        svc = service_principal()
+        assert EXEC_NAMESPACE in mesh.authz.readable_namespaces(svc)
+        assert EXEC_NAMESPACE in mesh.authz.writable_namespaces(svc)
+
+    def test_user_principal_defaults_to_read_only(self):
+        p = user_principal("bob", "platform")
+        assert p.roles == frozenset({"wiki.reader"})
+
+    def test_user_principal_never_gets_exec_by_default(self):
+        p = user_principal("bob", "platform", roles={"wiki.reader", "wiki.writer"})
+        assert not p.has_role("wiki.writer.exec")
 
 
 class TestStructuredOutputParsing:

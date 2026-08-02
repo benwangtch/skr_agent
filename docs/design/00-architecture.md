@@ -1,7 +1,15 @@
 # Copilot / Wiki Coordinator / Report Generation — 架構決策
 
-狀態：提案，待 review
+狀態：提案，第二版（推翻了第一版對 wiki coordinator 的判斷）
 範圍：三個元件之間的關係，以及哪些東西要為未來的 skills-sharing platform 抽出來
+
+---
+
+## 更新記錄
+
+第一版把 wiki coordinator 設計成一個 agent（`wiki_ask` / `wiki_publish` 兩個 AgentSpec，內部用檢索拼答案）。你指出「wiki coordinator 好像不一定要存在」之後我重新檢查了自己在第一版寫的理由，發現站不住腳的那一半（「互動形態不同」）其實是我自己在 §2 就已經承認的東西——只是沒有把結論推到底。這一版把它推到底：**wiki 不是 agent，是一組掛授權的 tools。** 詳見 §2、§3。
+
+同時你也把兩個之前沒進到設計裡的需求講清楚了：定期報告是給高層看的，使用者自己觸發的報告要照使用者的權限走。這不是同一份報告換個開關，是兩種不同的 clearance 模型——已經在 §5 和程式碼裡落地。
 
 ---
 
@@ -9,12 +17,12 @@
 
 | 問題 | 決定 | 一句話理由 |
 |---|---|---|
-| Wiki coordinator 該不該存在？ | **該**，但它是**服務邊界**，不是「一個 agent」 | 有人得是 namespace 授權的唯一權威；那個東西就叫 wiki coordinator |
-| Copilot 直接掛 wiki tools 行不行？ | **不行** | 那等於把 division→namespace 的規則複製到 copilot，每加一個部門要改兩個服務 |
-| Report generation：skill 還是 sub-agent？ | **兩個都要，但職責不同** | skill = 格式與判準（知識）；sub-agent = 平行調查（執行）；它們不是替代關係 |
-| Report agent 掛在誰底下？ | **和 wiki coordinator 平行，但把它當成自己的 tool** | 外部搜尋和多公司 fan-out 不是 wiki 的職責 |
-| Deep agent 還是 nanobot？ | **Claude Agent SDK**，而且這個問題被問錯了（見 §5） | 真正的軸線是「loop 誰擁有」和「skill 是什麼格式」 |
-| 可復用什麼？ | **protocol + runtime 兩層**，feature 邏輯不復用 | 這兩層是每個 feature 都會重寫一次的東西 |
+| Wiki coordinator 該不該存在？ | **不用，預設不存在** | 它要解決的問題（授權）已經在 tool 層解決了；再包一層 agent 只有成本，沒有新增的正確性 |
+| Copilot 直接掛 wiki tools 行不行？ | **行，而且應該這樣做** | 授權規則寫在 tool 層的 authorizer 裡，不是寫在 copilot 裡；copilot 掛 tool 不代表 copilot 懂規則 |
+| Report generation：skill 還是 sub-agent？ | 兩個都要，職責不同（不變） | skill = 格式與判準；sub-agent = 平行調查 |
+| 定期報告 vs 使用者觸發報告 | **同一個 agent，不同 principal** | 差別是誰在問，不是問什麼；權限模型必須把這個差異當一等公民 |
+| Deep agent 還是 nanobot？ | **Claude Agent SDK**，理由更新為「已查證」 | 見 §6：nanobot 有自己的 skills 系統，但不是 `SKILL.md`／progressive disclosure 相容 |
+| 可復用什麼？ | protocol + runtime + wiki tool factory | 這三層是每個 feature 都會重寫一次的東西 |
 
 ---
 
@@ -22,260 +30,275 @@
 
 ```
                     ┌──────────────┐
-   FE Dashboard ───▶│   Copilot    │  路由層，不含 feature 邏輯
+   FE Dashboard ───▶│   Copilot    │  路由層 + 直接掛 wiki tools
                     └──────┬───────┘
-                           │  agent-as-tool（同一套 protocol）
-              ┌────────────┴─────────────┐
-              ▼                          ▼
-   ┌────────────────────┐    ┌────────────────────────┐
-   │  Wiki Coordinator  │◀───│  Report Agent          │
-   │  （其他同事開發）    │tool│  （deep research）      │
-   │  wiki_ask          │    │  + BOM / news search    │
-   │  wiki_publish      │    │  + company-investigator │
-   └─────────┬──────────┘    │    sub-agents           │
-             │               │  + wiki-report skill    │
-             ▼               └────────────────────────┘
-   ┌────────────────────┐
-   │  Wiki DB           │
-   │  （namespace 隔離） │
-   └─────────▲──────────┘
-             │
-   ┌────────────────────┐
-   │  Ingestion pipeline │  weekly reports → wiki pages
-   └────────────────────┘
+                           │
+              ┌────────────┼─────────────────┐
+              │            │ agent-as-tool    │ 直接掛 tool
+              ▼            ▼                  ▼
+   ┌────────────────┐            ┌────────────────────────┐
+   │ Report Agent    │            │  Wiki 授權 Tools        │
+   │ （deep research）│───tool────▶│  wiki_search            │
+   │ + BOM/news 搜尋  │            │  wiki_read_page         │
+   │ + investigator   │            │  wiki_write_page        │
+   │   sub-agents      │            │  （namespace 授權在這裡）│
+   │ + wiki-report skill│            └───────────┬─────────────┘
+   └────────────────┘                        ▼
+                                    ┌────────────────────┐
+                                    │  Wiki DB           │
+                                    │  namespace 隔離      │
+                                    └─────────▲──────────┘
+                                              │
+                                    ┌────────────────────┐
+                                    │  Ingestion pipeline │
+                                    └────────────────────┘
 ```
 
-三條邊，同一種呼叫方式：`AgentRequest → AgentResponse`。這是刻意的——多加一個 feature 應該是註冊一筆，不是寫一個新的整合。
+Wiki 不再是拓撲圖上獨立的一個「節點」。它是一個**掛在呼叫者裡的 toolset**，copilot 和 report agent 各自掛一份，各自用自己的 principal 建構。這不是重複——`make_wiki_toolset(backend, authz)` 是同一個函式，兩處呼叫只是傳入不同的 principal。
 
 ---
 
-## 2. 為什麼 wiki coordinator 要獨立存在
+## 2. 為什麼 wiki coordinator 最後決定不做成 agent
 
-你給的兩個理由（資料/權限隔離、互動形態不同）我認為只有**第一個**站得住腳，第二個其實不是理由。這個區別重要，因為它決定了 coordinator 該長什麼樣。
+回顧第一版的兩個理由：
 
-### 站得住腳的：授權必須有唯一權威
+> 1. 資料/權限隔離——站得住腳
+> 2. 互動形態不同——**站不住腳**，我在原文就寫了「這描述的是實作複雜度，不是服務邊界」
 
-規則是「一個 division 的週報只能更新該 division namespace 的頁面」。如果 copilot 直接掛 `query_wiki(namespace=...)`，那 copilot 就得知道：
+第一版的失誤是：承認理由 2 不成立之後，沒有問下一個問題——**如果只剩理由 1，那 coordinator 到底需不需要是一個 agent？**
 
-- 每個使用者屬於哪個 division
-- 哪些 namespace 是共用的
-- 讀和寫的規則不對稱（可以讀 `shared`，但不能寫進 `shared`）
+答案是不需要。理由 1（授權要有唯一權威）要求的是「**namespace 規則寫在一個地方**」，不要求「這個地方是一個 LLM」。授權是規則判斷（principal 的 division/role 對照一張表），不是需要推理的問題。把它包進 agent，多出來的是：
 
-每新增一個部門、每改一次共用規則，要同時改 copilot 和 wiki。更糟的是：**未來 skills-sharing platform 上的第三方 agent 也會想查 wiki**，那時候你不可能要求每個第三方 agent 都正確實作你的 namespace 規則。
+- 一次 model round trip 的延遲和成本
+- 一次摘要——而摘要正是最容易把 citation 弄丟的地方（LLM 複述答案時，「引用哪份原始週報」這種結構化資訊最先被犧牲）
+- 一個新的攻擊面：prompt injection 現在多一個可以說服的對象
 
-所以 coordinator 存在的理由是：**授權決策必須發生在資料旁邊，而且必須由 callee 決定，不能相信 caller 的宣稱。**
+而且它解決的問題，tool 層已經解決了：`wiki_search` 的 handler 直接呼叫 `authz.check_read(principal, namespace)`，principal 是閉包捕獲、不是參數，跟 agent 版本的保證完全一樣。
 
-程式碼裡這件事是這樣落實的（`mesh.py`）：
+**新結論：wiki 是一組 tools，authorization 寫在 tool handler 裡，不需要 agent 包一層。**
+
+程式碼位置：`src/skr_agent/wiki/tools.py::build_wiki_tools`。
+
+---
+
+## 3. Copilot 直接掛 wiki tools——重新論證
+
+第一版說「不行」，理由是「這樣 copilot 就要懂 division→namespace 規則」。這個理由對**如果規則寫在 copilot 裡**成立，但錯誤地把「copilot 掛了 wiki tool」和「copilot 懂 wiki 規則」劃上等號。
+
+拆開看：
 
 ```python
-def agent_as_tool(spec, *, principal, parent, ...):
-    async def _invoke(args):
-        request = AgentRequest(principal=principal, ...)  # ← closure，不是 args
+def make_wiki_toolset(backend, authz):
+    def factory(ctx):           # ctx.principal 是呼叫者傳進來的
+        async def wiki_search(args):
+            authz.check_read(ctx.principal, ...)   # ← 規則在這裡，不在 copilot
 ```
 
-principal 是**閉包捕獲**的，不是 tool 參數。模型無法在 tool call 裡寫一個不同的 `division`，因為 schema 裡根本沒這個欄位。這不是靠 prompt 約束，是靠型別。
+Copilot 呼叫 `build_copilot(registry, wiki_backend=..., wiki_authz=...)`，把 backend 和 authz **當依賴注入**，不是自己重新實作規則。規則邏輯（`WikiAuthorizer` 類別）一行都沒有出現在 `copilot.py` 裡。新增一個部門，改的是 `wiki/authz.py`，copilot 不用碰。
 
-對應測試：`tests/test_mesh.py::TestPrincipalBinding`、`tests/test_wiki_authz.py::TestCoordinatorEnforcement::test_caller_cannot_widen_scope_via_inputs`。
+這其實正是原本 wiki coordinator 該扮演的角色——**它不需要是網路上一個獨立服務或一個 agent，它可以是一個共用的 Python 模組（在真正跨服務時就是一個共用 client library），只要授權邏輯物理上只存在一份。**
 
-### 站不住腳的：「互動形態不同」
+之前的擔心（「授權必須有唯一權威」）被滿足了，只是這個「權威」現在是 `wiki/authz.py` 這個檔案／未來的 wiki 服務 client，不是一個要跑 model 的 agent。
 
-「wiki 問答需要多步 tool use，所以要有自己的 loop」——這描述的是**實作複雜度**，不是**服務邊界**。Copilot 本來就是 agent，它自己就能跑多步 tool use。如果只有這個理由，正確答案是把 tools 掛給 copilot，不是拆服務。
+**什麼時候要把它升級回一個獨立服務？** 當 wiki 從「in-process 模組」變成「別的團隊維護、透過網路呼叫的東西」的那天，`make_wiki_toolset` 的實作內部從呼叫本地 `WikiBackend` 換成打 API，介面不變——這是 `assembly.py` 裡明確留的擴充點。
 
-這點值得講清楚，因為它影響 wiki coordinator 的設計：**coordinator 不一定要是 deep agent。** 它只要是一個「有授權、有 citation、可被當成 tool 呼叫」的服務。它內部是 RAG、是 deep agent、還是查資料庫，是你們同事的自由，只要 contract 不變。
-
-這也是為什麼這一版把它 mock 掉，而且 mock 得很笨（`wiki/coordinator.py` 只做關鍵字檢索 + 拼接），沒有任何損失。
+**什麼時候要把它升級成 agent？** 只有一個理由夠格：wiki 團隊想要**主動擁有檢索品質**（query rewriting、多跳推理、reranking），這是需要模型推理的問題，不是授權問題。這種情況下 `wiki/coordinator.py` 已經是可以直接用的骨架——包住同一組 tools，加一層 synthesis。它預設不啟用（`build_mesh(with_wiki_agent=False)`），因為預設情況下多這一層沒有淨收益。
 
 ---
 
-## 3. 為什麼 report agent 是 deep agent，wiki coordinator 不必是
+## 4. 為什麼 report agent 還是 deep agent（不變）
 
-你自己的判斷是對的：incident 收集是**開放式規劃**——每家公司要查幾次、查到什麼程度算夠、要不要繼續 cross-reference，都是模型現場決定的。步驟數不固定，這正是 deep agent 存在的理由。
+判準不變：
 
-反過來說，deep agent 是貴的選項。判準是：
+> 步驟數事先可知 → 固定 pipeline。
+> 步驟數要現場決定 → deep agent。
 
-> **步驟數事先可知 → 固定 pipeline（直接呼叫 Messages API）。
-> 步驟數要現場決定 → deep agent。**
+Incident 收集仍然是開放式規劃——這個結論沒有因為 wiki 的決策改變而改變，因為 report agent 面對的不確定性來自**外部新聞搜尋要查幾輪**，跟 wiki 怎麼實作無關。
 
-用這個判準檢查三個元件：
-
-| 元件 | 步驟數 | 結論 |
-|---|---|---|
-| Copilot | 通常一次 tool call + 轉述 | 淺 agent 就夠，`effort="medium"` |
-| Wiki coordinator | 檢索 → 組答案，可預測 | 不必是 deep agent |
-| Report agent | 每家公司查幾輪不固定 | **真正需要 deep agent** |
-
-所以 `runtime.py` 的 `DeepAgent` 三個都能用，但參數差很多——copilot 是 `effort="medium", max_turns=20`，report agent 是 `effort="high", max_turns=60` 加 sub-agents。
+值得記錄的調整：report agent 現在**直接**掛 wiki tools（`make_wiki_toolset(..., writable=True)`），不再透過一層 coordinator agent 轉發。少一個 hop，citation 直接進 `ToolContext.cite()`，不需要跨 agent 邊界搬運。`company-investigator` sub-agent 只拿到 `wiki_search` / `wiki_read_page`，沒有 `wiki_write_page`——寫入權限只留給頂層 agent，這條規則沒變。
 
 ---
 
-## 4. Skill 還是 sub-agent？兩個都要，但別搞混
+## 5. 定期報告 vs 使用者觸發報告：同一個 agent，不同 principal
 
-這是最容易做錯的一題。它們不是同一個軸上的選項：
+這是這一版新增、也是你提出後我認為最該補的一塊。
 
-| | Skill | Sub-agent |
-|---|---|---|
-| 是什麼 | **知識**：格式、判準、規則 | **執行單元**：獨立 context 的 worker |
-| 解決什麼 | 「報告該長什麼樣」 | 「四家公司要平行查」 |
-| 載入時機 | progressive disclosure，需要時才進 context | 主 agent 決定要 fan-out 時 |
-| 可分享嗎 | **可以**——這就是 skills platform 的商品 | 不太行，綁死在 harness |
+你的兩句話拆開是兩個獨立的需求：
 
-具體到 wiki report：
+> 定期產的 report 是給高層看的 → **輸出的 clearance 比一般使用者高**
+> User 自己產的 report 看他有什麼權限 → **輸出的 clearance 等於觸發者自己的**
 
-- **`.claude/skills/wiki-report/SKILL.md`** 放 severity rubric、頁面結構、provenance 規則。這是你們現在已經在維護的那個 skill，形式不變。它是「知識」，換一個 agent 來執行也還是同一份。
-- **`company-investigator` sub-agent** 負責「查一家公司」。四家公司同時發出去，各自有獨立 context，不會互相污染。這是「執行」。
+如果只有一個 principal 種類，這兩件事沒辦法同時滿足——要嘛所有報告都放寬到「使用者能看到的」（高層專屬的內容就沒了），要嘛都收緊到「排程帳號能看到的」（一般使用者觸發時看到超出自己權限的東西）。
 
-如果只有 skill 沒有 sub-agent：BOM 掃描會變成主 agent 在一個 context 裡塞四家公司的搜尋結果，context 爆掉、後面幾家品質下降。
-如果只有 sub-agent 沒有 skill：每個 investigator 的 severity 判準會不一致，因為判準只存在於 prompt 裡而不是可共享的文件。
-
-一個具體的設計選擇：**investigator 沒有 `wiki_publish` 權限**。只有主 agent 能寫。這在 `tests/test_wiring.py::test_subagent_cannot_publish` 有守住。
-
----
-
-## 5. Deep agent 還是 nanobot？——這個問題要重問
-
-「deep agent vs nanobot」把兩個不同的決策綁在一起了。拆開之後是兩個問題：
-
-**問題 A：agent loop 誰擁有？**
-自己寫 / Agent SDK 提供 / 平台代管。
-
-**問題 B：skill 用什麼格式？**
-Claude 的 `SKILL.md`（progressive disclosure）/ 框架自訂 / 純 prompt 字串。
-
-問題 B 對你們是決定性的，因為你說**要為 skills-sharing platform 而設計**。一個能分享 skill 的平台，商品就是 skill 本身；如果 skill 格式和你們現在維護的那份不一樣，遷移成本會在最不該出現的地方出現。
-
-**建議：Claude Agent SDK。** 理由：
-
-1. 原生吃 `SKILL.md`，你們現有那份 wiki report skill 直接沿用，不用翻譯成 prompt
-2. loop、planning、context compaction、sub-agent dispatch、MCP tools 都內建，我們不重寫
-3. tool 是 MCP——這代表未來要換 host（含 nanobot 這類 MCP-based 的 runtime）時，tool 層可以整組搬走
-
-關於 nanobot 我要誠實說明：我對它目前的細節掌握不夠完整，不該基於印象做這個決定。但**架構上這個決定可以延後**——因為 `protocol.py` 完全不依賴 Claude。`AgentRequest`/`AgentResponse`/`Principal` 沒有一行 import claude_agent_sdk。真的要換 runtime，換的是 `runtime.py` 一個檔案，protocol 和所有 feature 邏輯不動。
-
-**建議的驗證方式**：拿實際的 BOM 掃描任務，同一份 skill、同一組 tool，在兩個 runtime 上各跑一次，比 (a) 完成率 (b) token 成本 (c) skill 是否需要改寫。這比繼續在會議上辯論便宜。
-
----
-
-## 6. 可復用的是哪兩層
-
-你說 runtime 和 protocol 都要復用。我同意，但要講清楚**不該復用什麼**——不然抽象會長到擋路。
-
-### Layer 1：`protocol.py` — 契約（最重要）
+**解法是把「誰觸發」變成一等公民，而不是報告內容的一個參數：**
 
 ```python
-Principal      # 誰在問。authority。
-AgentRequest   # 一次工作。principal + task + inputs + budget + trace
-AgentResponse  # 統一回傳。status / output / citations / usage
-Citation       # 出處。wiki_page | raw_report | external_url | internal_record
-AgentSpec      # 一個有名字、有描述、有 schema 的能力。capability。
+# src/skr_agent/principals.py
+
+def service_principal(...) -> Principal:
+    # 跨 division 讀，只能寫進 exec namespace
+    roles = {wiki.reader, wiki.reader.all, wiki.exec, wiki.writer, wiki.writer.exec}
+
+def user_principal(subject, division, roles=...) -> Principal:
+    # 預設只讀自己 division + shared；wiki.writer 也只能寫自己 division
+    ...
 ```
 
-這一層不知道 wiki、不知道 report、不知道 Claude。它是唯一四個元件（含未來的 platform）共同依賴的東西，所以必須保持乾淨。
+同一支 `mesh.report_agent`，同一個 prompt，跑出來的報告完全不同——**這是設計上要的**，不是需要修正的不一致。使用者問「我們的供應風險」，看到的是他 division 能看到的頁面組成的答案；排程跑同一件事，看到的是跨部門彙整。
 
-兩個設計重點：
+### 兩個新規則，因為這個切分而變得必要
 
-- **`Principal` 帶 `token`，其他欄位只是解碼後的方便視圖。** 跨信任邊界時重新驗 token，不信 caller 給的 division。
-- **`Citation` 進 protocol 而不是留給各 feature 自己處理。** 因為 wiki 這個 feature 的整個價值主張就是「頁面能追回原始週報」。provenance 是契約的一部分，不是呈現細節。
+單純把 service principal 設成「讀得比較多」是不夠的，會出現一個沒人故意設計、但邏輯上必然出現的洞：
 
-`Denied` 也在這層：權限拒絕是**正常結果**，不是錯誤。它會被轉成 `status="refused"` 回給呼叫的模型，讓模型知道為什麼被擋而改變策略——而不是當成 transport failure 重試。
+**Namespace clearance（`wiki/authz.py::WikiAuthorizer.clearance`）**——新增一個 `exec` namespace，讀取需要 `wiki.exec` role，不是靠 division 自動給。一般使用者、就算他的 division 剛好叫 `exec`，也不會自動拿到。
 
-### Layer 2：`runtime.py` + `mesh.py` — 執行殼
+**Aggregation check（`WikiAuthorizer.check_aggregation`）**——這是最容易漏掉的部分，值得展開講：排程 agent 用 `wiki.reader.all` 讀了 supply、finance、platform 三個 namespace，每一次讀都個別合法（service principal 有跨部門讀權）。彙整成一份報告後，如果寫入的目標 namespace 沒有相應的 clearance，內容就從「高層限定」洩漏成「任何人可讀」——**而這整個過程中，沒有任何一步單獨違反規則**。授權檢查如果只做在「讀」和「寫」兩個點，會漏掉「聚合」這個第三個動作。
 
-`DeepAgent` 做的事，是每個 feature 不做就得自己重寫一次的：
+```python
+def check_aggregation(self, target: str, sources: set[str]) -> None:
+    # 規則一：來源的 clearance 不能比目標寬
+    # 規則二：來源橫跨兩個以上 division，目標必須是有 clearance 的 namespace
+    #        （即使沒有任何單一來源本身是 gated 的）
+```
 
-- 把 tool 綁到 principal（tools 是**每次 request 建構**的 factory，不是 module-level 常數——這是安全性的關鍵）
-- budget 遞減（`Budget.child()` 永遠不會比 parent 大）
-- 收集 citation（`ToolContext.cite()`，tool 自己記錄出處，不靠模型記得複述）
-- 把 SDK message stream 轉回 `AgentResponse`
-- `setting_sources=[]` 預設不載入任何磁碟設定，避免 tool surface 被 `~/.claude` 意外撐大
+`tests/test_wiki_authz.py::TestAggregation` 和 `TestWriteTool::test_aggregation_leak_is_caught_even_when_write_access_is_broad` 把這個場景寫成測試：一個對 `shared` 有寫入權的 admin，嘗試把橫跨兩個 division 的內容寫進 `shared`，即使 `check_write` 本身會放行，`check_aggregation` 仍然擋下來。**這是兩層獨立的檢查，不是一層檢查兩次。**
 
-`mesh.py` 的 `agent_as_tool` 是讓「agent 互相當 tool」變成一行的東西。copilot→wiki 和 report→wiki 走的是**同一個函式**，不是兩個整合。
+### 對 report agent prompt 的影響
 
-### 不該復用的
+Prompt 現在明講兩件事：
 
-feature 邏輯。`wiki/authz.py` 的 namespace 規則就該留在 wiki 服務裡；report agent 的 BOM 邏輯就該留在 report 裡。把授權規則抽到共用層，代表每加一個 feature 都要改一個共用檔案——這是我們正在避免的東西。
-
----
-
-## 7. 對 skills-sharing platform 的意涵
-
-現在做的三件事，是那個產品直接要用的：
-
-1. **`AgentRegistry`** 就是 marketplace 的雛形。`register` / `list` / `catalog` / `dispatch`——一個能被列舉、被描述、被交給模型的能力目錄。現在是 in-process dict，之後換成服務，介面不變。
-2. **`AgentSpec` 統一了 agent / tool / skill-backed workflow 的形狀。** 這代表「別的部門分享出來的能力」可以直接被你的 agent 當 tool 用，不需要 per-integration 的 adapter。
-3. **`Principal` 的重新驗證原則**是多租戶的前提。平台上跑別人寫的 agent 時，你不能相信它宣稱的身分。這個原則現在就寫進契約，比之後補便宜得多。
-
-一個現在還沒做、但那個產品一定需要的：**能力的 sandboxing 與計費歸屬**。`Budget` 有欄位但只做到 turn 上限；`Usage` 有回傳但沒有往上聚合。列在 §9。
+1. wiki 存取範圍由觸發者決定；查不到不代表「這件事沒發生」，可能是「這次執行看不到」
+2. 一份彙整多個 division 的報告要發布到有 clearance 的 namespace；如果被拒絕，正確反應是**改發布目標**，不是拿掉造成檢查觸發的來源引用
 
 ---
 
-## 8. 這一版實際交付了什麼
+## 6. Nanobot 對 Claude Skill 格式的支援程度——已查證
+
+我去讀了原始碼（`HKUDS/nanobot`，`nanobot/agent/skills.py` + `nanobot/skills/*/SKILL.md`），不是只讀 README。結論比網路上的介紹頁準確：
+
+**檔案格式相容，但不是同一份實作，有具體落差要注意。**
+
+| 項目 | Claude Agent Skills | nanobot |
+|---|---|---|
+| 檔案 | `SKILL.md`，YAML frontmatter | 相同——`nanobot/agent/skills.py` 明確處理 `SKILL.md` |
+| Frontmatter 欄位 | `name`, `description`（觸發用）, `license`, `allowed-tools` | **多了 `metadata: {"nanobot": {...}}`**——nanobot 專屬的 runtime 提示，例如 `emoji`、`requires.bins`（相依的執行檔）、`install`（怎麼裝相依套件）。你們 skill 裡沒有這個欄位，會被忽略，不會壞。 |
+| Progressive disclosure | 有——描述常駐 context，本文按需讀取 | **有，但實作方式不同**：`build_skills_summary()` 產生「name + description + 相對路徑」的摘要放進 context，模型要看全文時**用 file read tool 自己讀 SKILL.md**，而不是 Claude Code 那種由 harness 決定何時注入全文的機制。對你們現有 skill 幾乎沒差，因為你們也是靠 description 觸發。 |
+| `allowed-tools` frontmatter 欄位 | 有 | **驗證器認得這個欄位**（`skill-creator/scripts/quick_validate.py` 的 `ALLOWED_FRONTMATTER_KEYS` 包含它），但我沒有在載入路徑（`skills.py`）裡看到它被拿來做任何事——看起來是承認欄位存在但尚未接線執行。**不要假設它會被強制。** |
+| 目錄結構（`scripts/` `references/` `assets/`） | 支援 | 支援，`ALLOWED_RESOURCE_DIRS` 同名 |
+| 你們現有的 `wiki-report/SKILL.md`（只有 `name` + `description`，無 nanobot 專屬欄位） | — | **會被正確辨識、正確觸發、正確載入全文**，不需要改一個字 |
+
+**能力邊界，不是格式問題：**
+
+- Skill 只給知識，不給執行環境保證。這份 skill 假設有 `wiki_search` / `wiki_write_page` 這些 tool 名稱存在——不管換到哪個 runtime，tool 名稱都要對得上，這件事和 skill 格式相容性是兩回事，Claude Agent SDK 和 nanobot 都一樣。
+- Nanobot 的 subagent 模型是「同一個 loop 裡 spawn，`maxConcurrentSubagents` 全域限流」（`nanobot/agent/subagent.py`），不是 Claude Agent SDK 的 `AgentDefinition` per-agent 設定（tools/model/effort 各自獨立）。如果换 runtime，`company-investigator` 那種「每個 investigator 自己的 tool 白名單」要重新設計，這是 §5 「skill vs sub-agent」裡「sub-agent 不太可分享」判斷的又一個例證。
+
+**結論對決策的影響：** §6（原 §5）「format compatibility」這個論點基本成立——skill 檔案能原封不動搬過去。但這不構成換 runtime 的理由，因為 SKILL.md 從來不是唯一的相容性障礙；tool 名稱、subagent 設定模型都要重寫。**建議維持用 Claude Agent SDK**，因為它是唯一原生把 `SKILL.md` 當一等公民、progressive disclosure 由 harness（而非模型自己讀檔）保證的選項——這件事在你們要對外分享 skill 給 skills-sharing platform 上其他 agent 用的時候會變重要：harness 保證的行為比「模型自己決定要不要讀全文」更可預期。
+
+---
+
+## 7. Skill 還是 sub-agent（不變，補一句）
+
+判準不變（見上一版 §4）。補一句跟 §6 有關的：**skill 是可搬遷的，sub-agent 設定不是。** 這進一步支持「skill 該是可分享的商品，sub-agent 定義該留在各自的 runtime 裡」這個 skills-sharing platform 的產品邊界。
+
+---
+
+## 8. 可復用的三層
+
+跟上一版比多了一層：
+
+### Layer 1：`protocol.py`——契約（不變）
+
+`Principal` / `AgentRequest` / `AgentResponse` / `Citation` / `AgentSpec` / `Denied`。不依賴 Claude，不知道 wiki 或 report。
+
+### Layer 2：`runtime.py` + `mesh.py`——執行殼（不變）
+
+`DeepAgent`、`agent_as_tool`、`AgentRegistry`。
+
+### Layer 3（新增於這一版）：`wiki/tools.py::build_wiki_tools` 這個模式本身
+
+不是 wiki 的邏輯要復用（namespace 規則永遠留在 wiki），是**「授權 tool factory」這個形狀**值得抽成慣例：
+
+```python
+def make_<feature>_toolset(backend, authz) -> ToolsetFactory:
+    def factory(ctx: ToolContext) -> ToolBundle:
+        # tool handler 直接呼叫 authz.check_*(ctx.principal, ...)
+        ...
+    return factory
+```
+
+任何新 feature 只要「授權規則寫在 tool 層」這個判斷成立（大部分 feature 都成立——真正需要包一層 agent 的理由通常是「檢索/生成需要推理」，不是「需要授權」），都可以照這個形狀寫，不用重新決定「要不要包一個 coordinator agent」這個問題——預設不包，除非有 §3 結尾那個具體理由。
+
+---
+
+## 9. 對 skills-sharing platform 的意涵（更新）
+
+除了上一版列的三點（`AgentRegistry` 是 marketplace 雛形、`AgentSpec` 統一形狀、principal 重新驗證原則），這一版多兩個：
+
+4. **「授權 tool factory」模式（§8 Layer 3）本身可以是平台提供的建構區塊**——第三方開發者掛自己的 feature 時，不用每次重新決定「我要不要包一個 agent 才能做授權」，直接套用同一個 factory 形狀。
+5. **同一 agent、不同 principal 產生不同輸出**（§5）是多租戶平台的基本假設，現在提早寫進契約，比之後補便宜。第三方 agent 在平台上跑，永遠是「這次呼叫的 principal 決定它能看到什麼」，不是「這個 agent 本身有沒有權限」。
+
+---
+
+## 10. 這一版實際交付了什麼
 
 ```
 src/skr_agent/
-  protocol.py          契約層（不依賴 Claude）
-  mesh.py              agent-as-tool + registry
-  runtime.py           DeepAgent（Claude Agent SDK 之上的薄殼）
-  assembly.py          組裝——唯一知道所有模組的檔案
-  copilot.py           copilot 的 tool surface
+  protocol.py            契約層
+  mesh.py                agent-as-tool + registry
+  runtime.py              DeepAgent
+  principals.py           ★ 新增：service_principal / user_principal
+  assembly.py              組裝，wiki_agent 預設關閉
+  copilot.py               ★ 改動：直接掛 wiki tools，不再透過 coordinator
   wiki/
-    authz.py           namespace 規則（wiki 服務自己的）
-    backend.py         儲存介面 + fixture 實作
-    coordinator.py     ★ MOCK — 同事接手時只換這個檔案
+    authz.py                ★ 改動：加入 clearance（exec namespace）與 check_aggregation
+    backend.py               不變
+    tools.py                 ★ 新增：wiki 的主要介面，build_wiki_tools + make_wiki_toolset
+    coordinator.py           ★ 改動：降級為 opt-in 的 LLM synthesis 層，預設不啟用
   report/
-    sources.py         BOM / news 介面 + fixture 實作
-    tools.py           toolset factories
-    agent.py           ★ 主要交付物：deep research agent
-.claude/skills/wiki-report/SKILL.md   報告格式與 severity rubric
-fixtures/              4 家公司、4 篇新聞、5 頁 wiki、4 份原始週報
-examples/run_report.py end-to-end 跑一次
-tests/                 45 個測試，全部不需要 API 金鑰
+    sources.py / tools.py    不變
+    agent.py                 ★ 改動：直接掛 wiki tools，prompt 加入 principal-scoped 說明
+.claude/skills/wiki-report/SKILL.md   不變
+fixtures/                     不變
+examples/run_report.py         ★ 改動：--scheduled / 使用 principals.py
+tests/                         69 個測試（原 45 + 24 新增），全部不需要 API 金鑰
 ```
 
-跑起來：
+新增測試涵蓋：exec namespace clearance、service principal 的跨部門讀寫邊界、aggregation leak（含「即使 write 權限本身放行，aggregation 仍擋下」這個關鍵情境）、wiki tools 在 `writable=False` 時 write tool 確實不存在（不是被拒絕，是不存在）、copilot 掛 wiki tool 的預設唯讀。
+
+跑法不變，新增 `--scheduled`：
 
 ```bash
-python examples/run_report.py                          # 完整掃描並發布
-python examples/run_report.py --dry-run                # 只研究不發布
-python examples/run_report.py --reader-only            # 驗證權限拒絕路徑
-python examples/run_report.py --ask "ASC-4400 現在的供應風險？"   # 走 copilot
+python examples/run_report.py                    # 使用者觸發，自己 division 的權限
+python examples/run_report.py --scheduled         # 排程帳號，跨部門讀 + 寫 exec
+python examples/run_report.py --dry-run
+python examples/run_report.py --reader-only
+python examples/run_report.py --ask "..."
 ```
 
 ---
 
-## 9. 已知取捨與未決事項
+## 11. 已知取捨與未決事項
 
-**明確做了但可能有爭議的取捨**
+**這一版解決的（原 §9 清單的對應項）**
 
-- **Copilot 直接呼叫 report agent，不經過 wiki coordinator。** 代價是 copilot 的 tool 數量會隨 feature 線性成長，到十幾個以上時要引入 tool search 或分層路由。但另一個選擇（讓 wiki coordinator 代理 report generation）會讓它變成一個它並不擁有的能力的 proxy，更糟。
-- **`permission_mode="bypassPermissions"`。** tool surface 已經用 `allowed_tools` 明確白名單，且沒有給 Bash/Write，所以不需要互動式確認。**但這在生產環境要重新檢視**——尤其如果之後給 report agent 檔案或 shell 工具。
-- **Report agent 的 `wiki_publish` 失敗時不繞路。** prompt 明講：被拒絕就回報完成的內容並說明沒發布，不要試別的路徑。這是刻意的——一個會想辦法繞過權限的 agent 比一個會失敗的 agent 危險得多。
+- ~~Usage 沒有跨 hop 聚合~~——wiki 現在是直接掛的 tool 而非透過 agent 轉發，report agent 的 usage 已經包含 wiki tool 呼叫的 token 成本，不再有「另一個 agent 的花費要往回聚合」的問題。這個副作用是拿掉 coordinator agent 之後意外解決的。
 
-**還沒解決的**
+**還沒解決的（不變或新增）**
 
-1. **Ingestion pipeline 完全沒碰。** 這一版假設 wiki 頁面已經存在。ingestion 的 idempotency（同一份週報跑兩次會怎樣）沒有設計。
-2. **`Usage` 沒有跨 hop 聚合。** report agent 呼叫 wiki coordinator 的成本目前不會回到 report agent 的 usage 裡。計費歸屬要靠這個。
-3. **Budget 只做到 turn 上限。** `max_usd` 有傳給 SDK，deadline 只在進入時檢查一次，不會中途中斷。
-4. **沒有迴圈偵測。** `parent_agent` 有記錄但沒用來擋 A→B→A。目前拓撲不會發生，開放給第三方 agent 時會。
-5. **排程觸發沒實作。** 你說排程和即時都要——即時路徑（copilot → report agent）已經通了；排程只是同一個 `agent.run()` 換一個 principal（service account）來呼叫，但 service account 的身分怎麼發還沒定。
-6. **Nanobot 沒有實測。** §5 的建議是基於「skill 格式相容性」這個論點，不是基於實測比較。
+1. **Ingestion pipeline 完全沒碰。** Idempotency 沒設計。
+2. **`Budget.max_usd` 只傳給 SDK，deadline 只在進入時檢查一次。** 中途超支不會中斷。
+3. **沒有迴圈偵測。** 目前拓撲用不到，開放給第三方 agent 時會需要。
+4. **排程觸發的身分怎麼發還沒定。** `service_principal()` 現在是函式呼叫，production 版需要決定這個憑證從哪來、怎麼輪替、被盜用時怎麼快速吊銷。
+5. **`clearance` 目前是寫死在 `WikiAuthorizer` 建構子裡的 dict。** 真的有多個 gated namespace（不只 exec）時，這要嘛變成設定檔，要嘛變成從身分系統查詢——現在的形狀只是佔位。
+6. **`wiki/coordinator.py`（opt-in 的 wiki_ask）沒有實際場景在用它。** 它存在是為了不擋住「wiki 團隊想要主動做檢索品質」這條路，但目前沒有 caller 開 `with_wiki_agent=True`。如果一直沒人用，該考慮直接刪掉，不要當成「以防萬一」的技術債留著。
+7. **Nanobot 的驗證停在原始碼閱讀，沒有實跑。** §6 的結論基於讀 `nanobot/agent/skills.py` 和幾個內建 skill 的 frontmatter，沒有拿你們的 `wiki-report` skill 實際跑一次 nanobot 驗證「觸發、載入、執行」全鏈路。如果要认真評估換 runtime，這一步省不掉。
 
 ---
 
-## 10. 給 wiki 團隊的 contract
+## 12. 給任何要新增 feature 的人：判斷清單
 
-同事接手時要滿足的，只有這些：
+這是從這次修正裡萃取出來、下次可以直接套用的三個問題，順序很重要：
 
-```python
-# 兩個 AgentSpec，名字固定
-wiki_ask      # inputs: {task: str, namespace?: str}
-wiki_publish  # inputs: {task, namespace, slug, title, body, source_refs: [str]}
-```
-
-三條不可協商的規則：
-
-1. **授權在 callee 決定。** 從 `request.principal` 重新推導可讀/可寫的 namespace，不要相信 inputs 裡任何看起來像權限宣稱的欄位。
-2. **`source_refs` 為空時必須拒絕 publish。** 這是 wiki 可信度的基礎，要在服務端擋，不能只寫在 prompt 裡。
-3. **回傳的 `citations` 要包含 `raw_report`，不只是 `wiki_page`。** 使用者問的是「這個結論從哪來」，答案是原始週報，不是中間的 wiki 頁。
-
-`src/skr_agent/wiki/coordinator.py` 是一份會動的參考實作，內部怎麼做（RAG、deep agent、SQL）完全自由。
-`tests/test_wiki_authz.py` 的 12 個測試可以直接拿去對真實實作跑——如果真實實作能通過，介面就是相容的。
+1. **這個 feature 需要授權嗎？** 需要 → 授權規則寫進一個 `authz.py`，掛成 tool（§2、§3 的模式），不要預設包 agent。
+2. **這個 feature 的步驟數事先可知嗎？** 不可知 → `DeepAgent`；可知 → 直接呼叫 Messages API 就好，不要為了「架構一致」硬套 agent。
+3. **這個 feature 會被多種 principal 呼叫（使用者 / 排程 / 第三方）嗎？** 會 → 現在就把 principal 種類和它們各自的 grant 寫清楚（像 `principals.py`），不要假設「反正輸入一樣，輸出應該也一樣」——那個假設在這次就是漏洞的源頭。
