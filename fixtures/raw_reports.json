@@ -1,0 +1,30 @@
+[
+  {
+    "report_id": "rpt-supply-2026-W28",
+    "namespace": "supply",
+    "week_of": "2026-07-06",
+    "author": "mei.chen",
+    "body": "Second-sourcing review for the ASC-4400 controller stalled again. Acme remains sole source; the qualification programme for the alternate part is roughly two quarters out. Flagged as our largest single-supplier exposure."
+  },
+  {
+    "report_id": "rpt-supply-2026-W29",
+    "namespace": "supply",
+    "week_of": "2026-07-13",
+    "author": "mei.chen",
+    "body": "Buffer stock on ASC-4400 stands at about five weeks of build. Kestrel EU lane already running two to three days late before the port action; watching it."
+  },
+  {
+    "report_id": "rpt-platform-2026-W29",
+    "namespace": "platform",
+    "week_of": "2026-07-13",
+    "author": "sam.okafor",
+    "body": "Copilot query latency p95 down to 1.4s after the retrieval cache change. Wiki ingestion pipeline backfilled the platform namespace for Q2."
+  },
+  {
+    "report_id": "rpt-supply-2026-W26",
+    "namespace": "supply",
+    "week_of": "2026-06-22",
+    "author": "mei.chen",
+    "body": "Northwind Optics passed the annual audit with no major findings. Lens assembly yields stable. No open corrective actions."
+  }
+]

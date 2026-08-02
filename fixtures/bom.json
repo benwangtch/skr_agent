@@ -1,0 +1,30 @@
+[
+  {
+    "company_id": "acme-semi",
+    "name": "Acme Semiconductor Ltd",
+    "tier": "critical",
+    "components": ["ASC-4400 controller", "ASC-4410 controller"],
+    "aliases": ["Acme Semi", "Acme Microelectronics"]
+  },
+  {
+    "company_id": "northwind-optics",
+    "name": "Northwind Optics GmbH",
+    "tier": "critical",
+    "components": ["NW-LENS-12 assembly"],
+    "aliases": ["Northwind Photonics", "NW Optics"]
+  },
+  {
+    "company_id": "belltower-plastics",
+    "name": "Belltower Plastics Inc",
+    "tier": "standard",
+    "components": ["BT-770 housing", "BT-772 bezel"],
+    "aliases": ["Belltower Industries"]
+  },
+  {
+    "company_id": "kestrel-logistics",
+    "name": "Kestrel Logistics SA",
+    "tier": "standard",
+    "components": ["inbound freight (EU lane)"],
+    "aliases": ["Kestrel Freight"]
+  }
+]

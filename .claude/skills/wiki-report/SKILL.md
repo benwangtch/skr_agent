@@ -1,0 +1,77 @@
+---
+name: wiki-report
+description: >
+  Format and severity rubric for supply-chain incident reports built from a BOM
+  scan. Load this before writing or publishing any incident report, roll-up, or
+  supplier assessment to the wiki — it defines the required page structure, the
+  severity scale, and the provenance rules a page must satisfy to be publishable.
+---
+
+# Supply-chain incident report
+
+## Severity rubric
+
+Assign one level per company. When evidence is thin, pick the lower level and
+say what would raise it.
+
+| Level | Meaning | Typical evidence |
+|---|---|---|
+| `critical` | Supply of a component we depend on is stopped or will stop | Site destroyed, insolvency filing, export ban naming the company |
+| `high` | Supply is materially at risk within a quarter | Extended outage, recall covering a component we buy, sanctions on a parent |
+| `medium` | Credible disruption with unclear reach | Regional disruption at one of several sites, labour action, breach with unknown blast radius |
+| `low` | Noted, no supply impact expected | Leadership change, litigation unrelated to production, minor breach |
+| `none` | No signal found this cycle | Searches returned nothing material |
+
+`none` is a finding. Record it with the queries you ran, so the next cycle can
+tell "we checked and found nothing" apart from "we did not check".
+
+## Page structure
+
+Publish to the reporting division's namespace with slug
+`incident-report-YYYY-WW`. Title: `Supply chain incident report — week NN, YYYY`.
+
+```markdown
+# Supply chain incident report — week NN, YYYY
+
+## Summary
+Two or three sentences. Lead with anything at `high` or `critical`; if there is
+nothing above `medium`, say that in the first sentence.
+
+## Findings
+
+### <Company name> — <severity>
+- **What happened:** one or two sentences, sourced.
+- **Components affected:** from the BOM entry.
+- **Internal context:** what the wiki already knew, with the page reference.
+  Write "no internal record" when there is none.
+- **Assessment:** why this severity and not the one above or below it.
+- **Sources:** every URL and raw report id backing the above.
+
+### <Company name> — none
+- **Queries run:** the alias terms searched.
+- **Result:** no external signal found.
+
+## Coverage
+Companies scanned, companies skipped and why. A reader must be able to tell
+what this report does *not* cover.
+
+## Open questions
+Anything needing a human. Empty section is fine; delete it rather than padding.
+```
+
+## Provenance rules
+
+1. Every claim in **Findings** carries a source. No source, no claim.
+2. `source_refs` on the `wiki_publish` call lists every raw report id and
+   external URL used anywhere on the page. The publish is rejected without it.
+3. Never cite an article you have not fetched in full.
+4. Internal context comes from `wiki_ask` and keeps the returned page reference
+   verbatim. Do not paraphrase a page reference into a description of it.
+
+## Writing
+
+Lead with the outcome; supporting detail after. Plain sentences, terms spelled
+out — the reader was not watching you work and does not know the shorthand you
+built up along the way. Do not pad the page with filler sections; delete a
+heading rather than write "nothing to report here" under it, except in
+**Coverage**, where absence is the point.

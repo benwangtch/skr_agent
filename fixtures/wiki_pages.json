@@ -1,0 +1,42 @@
+[
+  {
+    "namespace": "supply",
+    "slug": "acme-semiconductor",
+    "title": "Acme Semiconductor Ltd — supplier profile",
+    "body": "Sole source for the ASC-4400 and ASC-4410 controllers. Second-sourcing has been open for three quarters; the alternate part qualification is roughly two quarters out as of W28. Buffer stock policy is six weeks of build; actual buffer was five weeks at W29. This is our largest single-supplier exposure and has been flagged as such in successive weekly reports.",
+    "source_refs": ["rpt-supply-2026-W28", "rpt-supply-2026-W29"],
+    "updated": "2026-07-14"
+  },
+  {
+    "namespace": "supply",
+    "slug": "northwind-optics",
+    "title": "Northwind Optics GmbH — supplier profile",
+    "body": "Supplies the NW-LENS-12 assembly. Passed the annual audit in June 2026 with no major findings and no open corrective actions. Lens assembly yields stable. Dual-sourced with a qualified alternate already in production.",
+    "source_refs": ["rpt-supply-2026-W26"],
+    "updated": "2026-06-23"
+  },
+  {
+    "namespace": "supply",
+    "slug": "kestrel-eu-lane",
+    "title": "Kestrel Logistics — EU inbound lane",
+    "body": "Primary inbound freight lane for European component shipments. Running two to three days behind baseline as of W29, before the port action began. No alternate carrier qualified on this lane.",
+    "source_refs": ["rpt-supply-2026-W29"],
+    "updated": "2026-07-14"
+  },
+  {
+    "namespace": "platform",
+    "slug": "copilot-overview",
+    "title": "Copilot — architecture overview",
+    "body": "Copilot fronts every dashboard feature and routes user questions to feature agents. Query latency p95 is 1.4s after the W29 retrieval cache change. The wiki ingestion pipeline writes into per-division namespaces.",
+    "source_refs": ["rpt-platform-2026-W29"],
+    "updated": "2026-07-14"
+  },
+  {
+    "namespace": "shared",
+    "slug": "incident-severity",
+    "title": "Incident severity — shared definitions",
+    "body": "Shared severity vocabulary used across divisions: critical, high, medium, low, none. Severity is assessed against supply impact, not against news prominence.",
+    "source_refs": ["rpt-supply-2026-W26"],
+    "updated": "2026-06-23"
+  }
+]

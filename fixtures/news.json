@@ -1,0 +1,34 @@
+[
+  {
+    "url": "https://example-news.test/acme-fab-fire",
+    "title": "Fire halts production at Acme Semiconductor's Hsinchu fab",
+    "published": "2026-07-28",
+    "source": "Industrial Wire",
+    "summary": "A fire in the chemical storage area of Acme Semiconductor's Hsinchu facility stopped production on 27 July. The company said the affected building handles back-end packaging for its ASC-4400 series and expects a six to eight week restart. No injuries were reported. A second Acme site in Kaohsiung is unaffected and the company is evaluating partial transfer of packaging volume.",
+    "companies": ["Acme Semiconductor Ltd", "Acme Semi"]
+  },
+  {
+    "url": "https://example-news.test/acme-statement",
+    "title": "Acme Semi issues supply guidance after Hsinchu incident",
+    "published": "2026-07-30",
+    "source": "Component Daily",
+    "summary": "Acme Microelectronics told customers to expect allocation on ASC-4400 and ASC-4410 controllers through Q4. The company declined to give a firm restart date and said allocation percentages would be communicated per-customer.",
+    "companies": ["Acme Semiconductor Ltd", "Acme Microelectronics"]
+  },
+  {
+    "url": "https://example-news.test/northwind-leadership",
+    "title": "Northwind Optics names new chief operating officer",
+    "published": "2026-07-25",
+    "source": "Optics Review",
+    "summary": "Northwind Photonics appointed a new COO effective September. The company reported no change to production plans or capacity guidance for its lens assembly lines.",
+    "companies": ["Northwind Optics GmbH", "Northwind Photonics"]
+  },
+  {
+    "url": "https://example-news.test/kestrel-strike",
+    "title": "Port workers' strike enters second week, freight forwarders warn of delays",
+    "published": "2026-07-29",
+    "source": "Freight Observer",
+    "summary": "A strike at two northern European ports has extended into a second week. Kestrel Freight said inbound lanes through the affected ports are running seven to ten days behind schedule and it is rerouting where capacity allows. Kestrel expects normal service to resume within three weeks of a settlement.",
+    "companies": ["Kestrel Logistics SA", "Kestrel Freight"]
+  }
+]
