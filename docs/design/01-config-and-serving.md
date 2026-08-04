@@ -104,7 +104,7 @@ LLM_MODEL=內部 host 用的 model 名稱
 驗證設定有生效（不需要真的打 API）：
 
 ```bash
-python -c "from skr_agent.config import get_llm; print(get_llm().to_cli_env())"
+uv run python -c "from skr_agent.config import get_llm; print(get_llm().to_cli_env())"
 ```
 
 ---
@@ -118,7 +118,7 @@ python -c "from skr_agent.config import get_llm; print(get_llm().to_cli_env())"
 ### 用法
 
 ```bash
-python examples/run_service.py                 # port 8000
+uv run python examples/run_service.py                 # port 8000
 curl http://localhost:8000/.well-known/agent-card.json | jq
 ```
 
@@ -174,7 +174,7 @@ await scheduler.run_forever(poll_interval=30)
 ## 6. 三者合起來怎麼跑
 
 ```bash
-python examples/run_service.py --port 8000 --cron "0 8 * * 1"
+uv run python examples/run_service.py --port 8000 --cron "0 8 * * 1"
 ```
 
 這個 process 裡，`asyncio.gather` 同時跑兩件事：uvicorn serve A2A 請求、scheduler 輪詢排程。兩邊打的是同一個 `mesh`（同一個 wiki backend、同一個 authz），所以排程觸發跟 A2A 呼叫觸發，最終走的是同一條程式碼路徑，只差在 principal 不同——跟 `docs/design/00-architecture.md` §5 講的「同一個 agent、不同 principal」是同一件事，這裡只是多了「誰觸發」的兩種方式（HTTP 呼叫 vs. cron），不是第三種模型。

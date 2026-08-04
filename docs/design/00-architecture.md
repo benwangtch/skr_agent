@@ -268,11 +268,11 @@ tests/                         69 個測試（原 45 + 24 新增），全部不�
 跑法不變，新增 `--scheduled`：
 
 ```bash
-python examples/run_report.py                    # 使用者觸發，自己 division 的權限
-python examples/run_report.py --scheduled         # 排程帳號，跨部門讀 + 寫 exec
-python examples/run_report.py --dry-run
-python examples/run_report.py --reader-only
-python examples/run_report.py --ask "..."
+uv run python examples/run_report.py                    # 使用者觸發，自己 division 的權限
+uv run python examples/run_report.py --scheduled         # 排程帳號，跨部門讀 + 寫 exec
+uv run python examples/run_report.py --dry-run
+uv run python examples/run_report.py --reader-only
+uv run python examples/run_report.py --ask "..."
 ```
 
 ---

@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """Serve the report agent over A2A and run its scheduled sweep, together.
 
-    python examples/run_service.py                       # port 8000, Monday 08:00 UTC
-    python examples/run_service.py --port 8080 --cron "*/5 * * * *"   # every 5 min, for testing
+    uv run python examples/run_service.py                       # port 8000, Monday 08:00 UTC
+    uv run python examples/run_service.py --port 8080 --cron "*/5 * * * *"   # every 5 min, for testing
 
 Once running:
     curl http://localhost:8000/.well-known/agent-card.json | jq

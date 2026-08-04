@@ -45,11 +45,22 @@ fixtures/          4 companies, 4 articles, 5 wiki pages, 4 raw weekly reports
 
 ## Setup
 
+Managed with [uv](https://docs.astral.sh/uv/) — `pyproject.toml` +
+`uv.lock`, no `requirements.txt`.
+
 ```bash
-python3 -m venv .venv && source .venv/bin/activate
-pip install -e ".[dev]"
+uv sync --group dev      # creates .venv, installs pinned deps from uv.lock
 cp .env.example .env
 ```
+
+`uv run <command>` runs inside that venv without activating it
+(`uv run pytest`, `uv run python examples/run_report.py`, ...). Prefer that
+over `source .venv/bin/activate` so the venv can't silently drift from the
+lockfile.
+
+Adding a dependency: `uv add <package>` (runtime) or `uv add --group dev
+<package>` (dev-only) — both update `pyproject.toml` and `uv.lock` together;
+don't hand-edit the dependency list and re-lock separately.
 
 Edit `.env` — the only line that needs a real value to run against OpenRouter
 (the default) is `LLM_API_KEY` (get one at https://openrouter.ai/keys). See
@@ -63,13 +74,13 @@ The test suite needs no credentials at all.
 ## Run it
 
 ```bash
-python examples/run_report.py                        # user-triggered, own division's access
-python examples/run_report.py --scheduled            # service account: cross-division, exec roll-up
-python examples/run_report.py --dry-run              # research only
-python examples/run_report.py --reader-only          # exercise the refusal path
-python examples/run_report.py --ask "What is our exposure on the ASC-4400?"
+uv run python examples/run_report.py                        # user-triggered, own division's access
+uv run python examples/run_report.py --scheduled            # service account: cross-division, exec roll-up
+uv run python examples/run_report.py --dry-run              # research only
+uv run python examples/run_report.py --reader-only          # exercise the refusal path
+uv run python examples/run_report.py --ask "What is our exposure on the ASC-4400?"
 
-python examples/run_service.py                       # A2A server + scheduler, same process
+uv run python examples/run_service.py                       # A2A server + scheduler, same process
 curl http://localhost:8000/.well-known/agent-card.json | jq
 ```
 
@@ -81,7 +92,7 @@ design doc §5.
 ## Test
 
 ```bash
-pytest              # 129 tests, no credentials required
+uv run pytest              # 129 tests, no credentials required
 ```
 
 Coverage: namespace authorization, clearance-gated namespaces, the

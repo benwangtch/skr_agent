@@ -1,11 +1,11 @@
 #!/usr/bin/env python3
 """End-to-end run of the report agent against the fixture data.
 
-    python examples/run_report.py                  # user-triggered sweep, own division
-    python examples/run_report.py --scheduled       # service-account sweep, exec roll-up
-    python examples/run_report.py --ask "..."       # ad-hoc question via copilot
-    python examples/run_report.py --dry-run         # research only, no publish
-    python examples/run_report.py --reader-only     # exercise the refusal path
+    uv run python examples/run_report.py                  # user-triggered sweep, own division
+    uv run python examples/run_report.py --scheduled       # service-account sweep, exec roll-up
+    uv run python examples/run_report.py --ask "..."       # ad-hoc question via copilot
+    uv run python examples/run_report.py --dry-run         # research only, no publish
+    uv run python examples/run_report.py --reader-only     # exercise the refusal path
 
 Needs credentials for the Claude Agent SDK (ANTHROPIC_API_KEY, or an
 `ant auth login` profile).
