@@ -12,6 +12,8 @@ different principals, and what nanobot's Claude-Skills support actually looks
 like (checked against source, not the README).
 [`docs/design/01-config-and-serving.md`](docs/design/01-config-and-serving.md)
 covers the env-driven config layer, the A2A server, and the scheduler.
+[`docs/design/02-package-management.md`](docs/design/02-package-management.md)
+covers why uv over pip and where dev dependencies live.
 [`docs/RUNBOOK.md`](docs/RUNBOOK.md) is the operational doc — every command to
 run this locally and a step-by-step manual end-to-end verification pass (the
 kind that actually calls the model, unlike the test suite below).
