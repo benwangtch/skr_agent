@@ -12,6 +12,9 @@ different principals, and what nanobot's Claude-Skills support actually looks
 like (checked against source, not the README).
 [`docs/design/01-config-and-serving.md`](docs/design/01-config-and-serving.md)
 covers the env-driven config layer, the A2A server, and the scheduler.
+[`docs/RUNBOOK.md`](docs/RUNBOOK.md) is the operational doc — every command to
+run this locally and a step-by-step manual end-to-end verification pass (the
+kind that actually calls the model, unlike the test suite below).
 
 ## Layout
 
@@ -88,6 +91,12 @@ Scheduled and on-demand runs are the same agent with a different `Principal`
 (`skr_agent.principals`) — that difference is what makes a scheduled sweep see
 the executive roll-up while a user only ever sees their own division. See
 design doc §5.
+
+Each of the above needs real `LLM_API_KEY` credentials and calls the model —
+see [`docs/RUNBOOK.md`](docs/RUNBOOK.md) §3 for what to expect from each one
+and how to confirm it actually worked (which namespace a report landed in,
+that a denied write fails the way it's supposed to, that the A2A server and
+scheduler survive running together).
 
 ## Test
 
