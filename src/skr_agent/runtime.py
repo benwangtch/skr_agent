@@ -28,6 +28,7 @@ from claude_agent_sdk import (
     query,
 )
 
+from .config import get_llm
 from .protocol import (
     AgentRequest,
     AgentResponse,
@@ -111,7 +112,7 @@ class DeepAgent:
         skills: list[str] | None = None,
         builtin_tools: Sequence[str] = (),
         model: str | None = None,
-        effort: str | None = "high",
+        effort: str | None = None,
         max_turns: int = 40,
         cwd: str | None = None,
         setting_sources: list[str] | None = None,
@@ -171,14 +172,15 @@ class DeepAgent:
             allowed.append("Skill")
 
         budget = ctx.request.budget
+        llm = get_llm()
         options = ClaudeAgentOptions(
             system_prompt=self.system_prompt,
             mcp_servers=servers,
             allowed_tools=allowed,
             agents=self.subagents or None,
             skills=self.skills,
-            model=self.model,
-            effort=self.effort,
+            model=self.model or llm.resolved_model(),
+            effort=self.effort or llm.effort,
             max_turns=min(self.max_turns, budget.max_turns),
             permission_mode="bypassPermissions",
             # Tools come from this process unless an agent explicitly opts in.
@@ -186,6 +188,11 @@ class DeepAgent:
             # settings, silently widening a tool surface an operator thought
             # they had pinned down.
             setting_sources=self.setting_sources,  # type: ignore[arg-type]
+            # This is the actual environment swap: which endpoint and
+            # credential the CLI subprocess for *this turn* talks to. See
+            # config/llm.py::to_cli_env for why provider="openrouter"/"custom"
+            # sends an empty ANTHROPIC_API_KEY rather than omitting it.
+            env=llm.to_cli_env(),
         )
         if self.cwd:
             options.cwd = self.cwd
