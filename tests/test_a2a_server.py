@@ -261,18 +261,18 @@ class TestAgentCard:
             return AgentResponse(status="ok")
 
         registry = AgentRegistry()
-        registry.register(AgentSpec(name="wiki_report", description="d1", handler=handler))
+        registry.register(AgentSpec(name="skr_agent", description="d1", handler=handler))
         registry.register(AgentSpec(name="wiki_ask", description="d2", handler=handler))
 
-        agent = StubAgent(name="wiki_report")
+        agent = StubAgent(name="skr_agent")
         card = build_agent_card(agent, base_url="http://localhost:8000/", registry=registry)
-        assert {s.id for s in card.skills} == {"wiki_report", "wiki_ask"}
+        assert {s.id for s in card.skills} == {"skr_agent", "wiki_ask"}
 
     def test_card_falls_back_to_the_bare_agent_with_no_registry(self):
-        agent = StubAgent(name="wiki_report", description="deep research agent")
+        agent = StubAgent(name="skr_agent", description="deep research agent")
         card = build_agent_card(agent, base_url="http://localhost:8000/")
-        assert [s.id for s in card.skills] == ["wiki_report"]
-        assert card.name == "wiki_report"
+        assert [s.id for s in card.skills] == ["skr_agent"]
+        assert card.name == "skr_agent"
 
     def test_card_url_is_the_configured_base_url(self):
         agent = StubAgent()

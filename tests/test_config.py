@@ -1,9 +1,10 @@
-"""The config layer: env-var overrides, provider defaults, the CLI-env shape
-that makes the OpenRouter/Qwen "simulate an internal host" trick work.
+"""The config layer: env-var overrides, provider defaults, and the chat model
+each provider resolves to.
 
 Each test clears LLM_/DB_/MINIO_* env vars first so the process's real
-environment (which may have ANTHROPIC_API_KEY set for other purposes) can't
-leak into an assertion.
+environment (which may have provider keys set for other purposes) can't leak
+into an assertion. Constructing a chat model performs no network I/O, so these
+stay credential-free.
 """
 
 from __future__ import annotations
@@ -34,48 +35,45 @@ class TestDefaults:
     def test_default_model_is_a_qwen35_slug(self):
         assert LLM().resolved_model().startswith("qwen/qwen3.5")
 
-    def test_default_base_url_is_the_anthropic_compatible_openrouter_path(self):
-        """Not /api/v1 — that's OpenRouter's OpenAI-compatible endpoint, which
-        speaks a different wire protocol than the Claude Agent SDK expects."""
-        assert LLM().resolved_base_url() == "https://openrouter.ai/api"
-
-    def test_no_key_set_still_produces_a_usable_env_shape(self):
-        env = LLM().to_cli_env()
-        assert env["ANTHROPIC_API_KEY"] == ""
-        assert "ANTHROPIC_BASE_URL" in env
-        assert "ANTHROPIC_AUTH_TOKEN" not in env  # nothing to send
+    def test_default_base_url_is_openrouters_openai_compatible_path(self):
+        """/api/v1 — the OpenAI-compatible endpoint. Running on LangChain
+        means the model client picks the protocol, so the OpenAI shape is the
+        one nearly every internal gateway also speaks."""
+        assert LLM().resolved_base_url() == "https://openrouter.ai/api/v1"
 
 
-class TestOpenRouterEnvShape:
-    """The specific env shape OpenRouter's Anthropic-compatible endpoint needs."""
+class TestChatModelConstruction:
+    def test_openrouter_builds_an_openai_client_pointed_at_openrouter(self):
+        chat = LLM(provider="openrouter", api_key="sk-or-abc").build_chat_model()
+        assert type(chat).__name__ == "ChatOpenAI"
+        assert str(chat.openai_api_base) == "https://openrouter.ai/api/v1"
+        assert chat.openai_api_key.get_secret_value() == "sk-or-abc"
 
-    def test_key_goes_on_auth_token_not_api_key(self):
-        env = LLM(provider="openrouter", api_key="sk-or-abc").to_cli_env()
-        assert env["ANTHROPIC_AUTH_TOKEN"] == "sk-or-abc"
+    def test_the_configured_model_reaches_the_client(self):
+        chat = LLM(provider="openrouter", api_key="k", model="qwen/qwen3.5-flash-02-23")
+        assert chat.build_chat_model().model_name == "qwen/qwen3.5-flash-02-23"
 
-    def test_api_key_is_explicitly_blanked_not_omitted(self):
-        """An omitted ANTHROPIC_API_KEY falls back to a locally logged-in
-        `claude` session, silently sending the request to the real Anthropic
-        API instead of the configured endpoint. Blanking it forecloses that."""
-        env = LLM(provider="openrouter", api_key="sk-or-abc").to_cli_env()
-        assert env["ANTHROPIC_API_KEY"] == ""
+    def test_per_agent_model_overrides_the_config_default(self):
+        """An agent may pin its own model; config only supplies the fallback."""
+        chat = LLM(provider="openrouter", api_key="k").build_chat_model(model="some/other-model")
+        assert chat.model_name == "some/other-model"
+
+    def test_anthropic_builds_an_anthropic_client(self):
+        chat = LLM(provider="anthropic", api_key="sk-ant-real").build_chat_model()
+        assert type(chat).__name__ == "ChatAnthropic"
+        assert chat.anthropic_api_key.get_secret_value() == "sk-ant-real"
 
     def test_base_url_override_wins_over_provider_default(self):
-        llm = LLM(provider="openrouter", base_url="https://internal.example/anthropic")
-        assert llm.resolved_base_url() == "https://internal.example/anthropic"
+        llm = LLM(provider="openrouter", base_url="https://internal.example/v1", api_key="k")
+        assert llm.resolved_base_url() == "https://internal.example/v1"
+        assert str(llm.build_chat_model().openai_api_base) == "https://internal.example/v1"
 
-
-class TestAnthropicProvider:
-    def test_anthropic_provider_uses_the_real_api_key_field(self):
-        env = LLM(provider="anthropic", api_key="sk-ant-real").to_cli_env()
-        assert env["ANTHROPIC_API_KEY"] == "sk-ant-real"
-        assert "ANTHROPIC_AUTH_TOKEN" not in env
-
-    def test_anthropic_provider_with_no_override_sets_no_base_url(self):
-        """Absence, not an explicit empty string — the SDK's own default
-        (api.anthropic.com) should apply, not an override to nothing."""
-        env = LLM(provider="anthropic").to_cli_env()
-        assert "ANTHROPIC_BASE_URL" not in env
+    def test_a_missing_credential_fails_at_build_not_mid_run(self):
+        """The provider client refuses to construct without a key. That is an
+        improvement on the previous setup, where an unset key silently fell
+        back to whatever credentials the machine happened to have."""
+        with pytest.raises(Exception, match="(?i)credential|api_key"):
+            LLM(provider="openrouter").build_chat_model()
 
     def test_anthropic_default_model_is_a_claude_model(self):
         assert LLM(provider="anthropic").resolved_model().startswith("claude-")
@@ -88,16 +86,23 @@ class TestCustomProvider:
         rather than silently pointing somewhere wrong."""
         assert LLM(provider="custom").resolved_base_url() is None
 
-    def test_custom_provider_uses_the_same_auth_token_shape_as_openrouter(self):
+    def test_custom_provider_speaks_the_openai_api_at_the_given_host(self):
         llm = LLM(
             provider="custom",
-            base_url="https://llm.internal.corp/anthropic",
+            base_url="https://llm.internal.corp/v1",
             api_key="internal-token",
+            model="internal/qwen3.5",
         )
-        env = llm.to_cli_env()
-        assert env["ANTHROPIC_AUTH_TOKEN"] == "internal-token"
-        assert env["ANTHROPIC_API_KEY"] == ""
-        assert env["ANTHROPIC_BASE_URL"] == "https://llm.internal.corp/anthropic"
+        chat = llm.build_chat_model()
+        assert type(chat).__name__ == "ChatOpenAI"
+        assert str(chat.openai_api_base) == "https://llm.internal.corp/v1"
+        assert chat.openai_api_key.get_secret_value() == "internal-token"
+
+    def test_custom_provider_without_a_model_is_a_loud_error(self):
+        """There is no sensible default model for an unknown host; failing at
+        construction beats a confusing 404 from the gateway mid-run."""
+        with pytest.raises(ValueError, match="no default model"):
+            LLM(provider="custom", base_url="https://x/v1").build_chat_model()
 
 
 class TestEnvVarOverrides:

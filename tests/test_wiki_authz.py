@@ -61,11 +61,20 @@ def backend() -> InMemoryWikiBackend:
 
 
 def toolset(backend, authz=None, *, principal, writable=True):
-    """Build the tool dict for one principal, keyed by name for easy lookup."""
+    """Build the tool dict for one principal, keyed by name for easy lookup.
+
+    Each value invokes the LangChain tool and returns its text result, so the
+    tests read as "call the tool, inspect what the model would see"."""
     request = AgentRequest(principal=principal, task="t")
     ctx = ToolContext(principal=principal, request=request)
     tools_list = build_wiki_tools(backend, authz or WikiAuthorizer(), ctx, writable=writable)
-    return {t.name: t.handler for t in tools_list}, ctx
+    return {tool.name: tool.ainvoke for tool in tools_list}, ctx
+
+
+def is_error(text: str) -> bool:
+    """A tool reports failure in-band, as text the model can reason about,
+    rather than by raising — see ``wiki/tools.py``."""
+    return text.startswith("Error:") or text.startswith("Permission denied:")
 
 
 class TestNamespaceReads:
@@ -169,15 +178,15 @@ class TestSearchTool:
     async def test_search_is_scoped_to_readable_namespaces(self, backend):
         tools, _ = toolset(backend, principal=reader("supply"))
         result = await tools["wiki_search"]({"query": "ASC-4400 controller"})
-        text = result["content"][0]["text"]
+        text = result
         assert "supply/acme" in text
         assert "finance/acme-terms" not in text
 
     async def test_explicit_cross_namespace_request_is_refused(self, backend):
         tools, _ = toolset(backend, principal=reader("supply"))
         result = await tools["wiki_search"]({"query": "contract terms", "namespace": "finance"})
-        assert result.get("is_error") is True
-        assert "permission denied" in result["content"][0]["text"].lower()
+        assert is_error(result)
+        assert "permission denied" in result.lower()
 
     async def test_caller_cannot_widen_scope_via_extra_args(self, backend):
         """A confused or adversarial caller passing extra fields gains nothing —
@@ -186,17 +195,17 @@ class TestSearchTool:
         result = await tools["wiki_search"](
             {"query": "ASC-4400", "namespaces": ["finance"], "division": "finance"}
         )
-        assert "finance/acme-terms" not in result["content"][0]["text"]
+        assert "finance/acme-terms" not in result
 
     async def test_empty_result_is_not_a_negative_finding(self, backend):
         tools, _ = toolset(backend, principal=reader("supply"))
         result = await tools["wiki_search"]({"query": "zzzqqq nonexistent topic"})
-        assert "no internal record" in result["content"][0]["text"].lower()
+        assert "no internal record" in result.lower()
 
     async def test_service_principal_searches_across_divisions(self, backend):
         tools, _ = toolset(backend, principal=service_principal())
         result = await tools["wiki_search"]({"query": "ASC-4400 controller contract terms"})
-        text = result["content"][0]["text"]
+        text = result
         assert "supply/acme" in text
         assert "finance/acme-terms" in text
 
@@ -212,12 +221,12 @@ class TestReadPageTool:
     async def test_read_across_namespace_is_refused(self, backend):
         tools, _ = toolset(backend, principal=reader("supply"))
         result = await tools["wiki_read_page"]({"ref": "finance/acme-terms"})
-        assert result.get("is_error") is True
+        assert is_error(result)
 
     async def test_malformed_ref_is_a_clean_error(self, backend):
         tools, _ = toolset(backend, principal=reader("supply"))
         result = await tools["wiki_read_page"]({"ref": "no-slash-here"})
-        assert result.get("is_error") is True
+        assert is_error(result)
 
 
 class TestWriteTool:
@@ -232,8 +241,8 @@ class TestWriteTool:
                 "source_refs": [],
             }
         )
-        assert result.get("is_error") is True
-        assert "source_refs" in result["content"][0]["text"]
+        assert is_error(result)
+        assert "source_refs" in result
 
     async def test_write_into_another_namespace_is_refused(self, backend):
         tools, _ = toolset(backend, principal=writer("supply"))
@@ -246,8 +255,8 @@ class TestWriteTool:
                 "source_refs": ["rpt-supply-1"],
             }
         )
-        assert result.get("is_error") is True
-        assert "permission denied" in result["content"][0]["text"].lower()
+        assert is_error(result)
+        assert "permission denied" in result.lower()
 
     async def test_successful_write_merges_source_refs(self, backend):
         tools, _ = toolset(backend, principal=writer("supply"))
@@ -260,7 +269,7 @@ class TestWriteTool:
                 "source_refs": ["rpt-supply-2"],
             }
         )
-        assert not result.get("is_error")
+        assert not is_error(result)
         page = backend.get_page("supply", "acme")
         assert page is not None
         assert set(page.source_refs) == {"rpt-supply-1", "rpt-supply-2"}
@@ -280,7 +289,7 @@ class TestWriteTool:
                 "source_refs": ["rpt-supply-1", "rpt-finance-1"],
             }
         )
-        assert not result.get("is_error"), result["content"][0]["text"]
+        assert not is_error(result), result
 
     async def test_aggregation_leak_is_caught_even_when_write_access_is_broad(self, backend):
         """The scenario the design doc calls out: a caller who *is* allowed to
@@ -299,8 +308,8 @@ class TestWriteTool:
                 "source_refs": ["rpt-supply-1", "rpt-finance-1"],  # two divisions
             }
         )
-        assert result.get("is_error") is True
-        assert "aggregates" in result["content"][0]["text"]
+        assert is_error(result)
+        assert "aggregates" in result
 
     async def test_service_principal_cannot_route_around_write_scope_via_aggregation(
         self, backend
@@ -318,4 +327,4 @@ class TestWriteTool:
                 "source_refs": ["rpt-supply-1", "rpt-finance-1"],
             }
         )
-        assert result.get("is_error") is True
+        assert is_error(result)

@@ -17,9 +17,9 @@ server rejects it with VERSION_NOT_SUPPORTED regardless of body shape:
             "message":{"messageId":"m1","role":"ROLE_USER",
                        "parts":[{"text":"what is our exposure on the ASC-4400?"}]}}}'
 
-Needs Claude Agent SDK credentials for whichever LLM_PROVIDER is configured —
-see .env.example. The A2A/scheduler wiring itself needs no credentials to
-start; it only calls the model once a task actually arrives or a cron job
+Needs LLM credentials for whichever LLM_PROVIDER is configured — see
+.env.example. The A2A/scheduler wiring itself needs no credentials to start;
+it only builds a model client once a task actually arrives or a cron job
 fires.
 """
 

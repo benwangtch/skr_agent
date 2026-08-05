@@ -1,8 +1,8 @@
 """Wiring. The only module that knows about every other module.
 
-Keeping composition in one place is what lets the wiki backend be fixtures
-today and a real service tomorrow without any agent noticing: the swap happens
-here, and nothing above changes.
+Keeping composition in one place is what lets a data source be fixtures today
+and a real service tomorrow without any agent noticing: the swap happens here,
+and nothing above changes.
 """
 
 from __future__ import annotations
@@ -11,7 +11,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 from .mesh import AgentRegistry
-from .report import FixtureBom, FixtureNewsFeed, build_report_agent
+from .report import FixtureBom, FixtureNewsFeed, build_skr_agent
 from .runtime import DeepAgent
 from .wiki import InMemoryWikiBackend, WikiAuthorizer, WikiBackend, WikiCoordinator
 
@@ -24,6 +24,7 @@ class Mesh:
     backend: WikiBackend
     authz: WikiAuthorizer
     report_agent: DeepAgent
+    """skr agent. Named for what it produces, not for the framework under it."""
     coordinator: WikiCoordinator | None = field(default=None)
     """Only present when ``with_wiki_agent=True``. See ``build_mesh``."""
 
@@ -33,12 +34,11 @@ def build_mesh(
     fixtures: str | Path,
     project_root: str | Path,
     model: str | None = None,
-    effort: str = "high",
     with_wiki_agent: bool = False,
 ) -> Mesh:
-    """Build the mesh against fixture data.
+    """Build skr agent and its data sources against fixture data.
 
-    ``with_wiki_agent`` controls the open question in the design: by default the
+    ``with_wiki_agent`` controls an open question in the design: by default the
     wiki is a set of authorized tools that callers mount directly, which is one
     fewer model hop and loses nothing. Set it to ``True`` to also register the
     LLM-backed ``wiki_ask`` — worth doing only if the wiki team takes ownership
@@ -52,14 +52,13 @@ def build_mesh(
     backend = InMemoryWikiBackend.from_fixtures(fixtures)
     authz = WikiAuthorizer()
 
-    report_agent = build_report_agent(
+    report_agent = build_skr_agent(
         bom=FixtureBom.from_fixtures(fixtures),
         news=FixtureNewsFeed.from_fixtures(fixtures),
         wiki_backend=backend,
         wiki_authz=authz,
         project_root=project_root,
         model=model,
-        effort=effort,
     )
 
     registry = AgentRegistry()

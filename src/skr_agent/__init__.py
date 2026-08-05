@@ -1,8 +1,8 @@
-"""skr-agent: a small agent mesh — copilot, wiki coordinator, report agent."""
+"""skr-agent: a deep research agent on LangChain's deepagents, plus its mesh."""
 
 from .assembly import Mesh, build_mesh
 from .copilot import build_copilot
-from .mesh import AgentRegistry, agent_as_tool, agents_as_toolserver
+from .mesh import AgentRegistry, agent_as_tool, agents_as_tools
 from .principals import service_principal, user_principal
 from .protocol import (
     AgentError,
@@ -23,7 +23,7 @@ __all__ = [
     "build_copilot",
     "AgentRegistry",
     "agent_as_tool",
-    "agents_as_toolserver",
+    "agents_as_tools",
     "service_principal",
     "user_principal",
     "AgentRequest",

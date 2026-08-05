@@ -55,7 +55,6 @@ class WikiCoordinator:
     backend: WikiBackend
     authz: WikiAuthorizer
     model: str | None = None
-    effort: str = "medium"
     max_turns: int = 15
 
     def _agent(self) -> DeepAgent:
@@ -65,7 +64,6 @@ class WikiCoordinator:
             system_prompt=SYSTEM_PROMPT,
             toolsets=[make_wiki_toolset(self.backend, self.authz, writable=False)],
             model=self.model,
-            effort=self.effort,
             max_turns=self.max_turns,
             input_schema={
                 "type": "object",

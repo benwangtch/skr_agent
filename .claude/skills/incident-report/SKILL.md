@@ -1,10 +1,9 @@
 ---
-name: wiki-report
+name: incident-report
 description: >
   Format and severity rubric for supply-chain incident reports built from a BOM
-  scan. Load this before writing or publishing any incident report, roll-up, or
-  supplier assessment to the wiki — it defines the required page structure, the
-  severity scale, and the provenance rules a page must satisfy to be publishable.
+  scan. Defines the required page structure, the severity scale, and the
+  provenance rules a report must satisfy before it can be published.
 ---
 
 # Supply-chain incident report
@@ -62,11 +61,11 @@ Anything needing a human. Empty section is fine; delete it rather than padding.
 ## Provenance rules
 
 1. Every claim in **Findings** carries a source. No source, no claim.
-2. `source_refs` on the `wiki_publish` call lists every raw report id and
-   external URL used anywhere on the page. The publish is rejected without it.
+2. `source_refs` on the publish call lists every raw report id and external
+   URL used anywhere on the page. The publish is rejected without it.
 3. Never cite an article you have not fetched in full.
-4. Internal context comes from `wiki_ask` and keeps the returned page reference
-   verbatim. Do not paraphrase a page reference into a description of it.
+4. Internal context keeps the returned page reference verbatim. Do not
+   paraphrase a page reference into a description of it.
 
 ## Writing
 

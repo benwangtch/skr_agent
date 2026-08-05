@@ -1,4 +1,4 @@
-from .agent import SYSTEM_PROMPT, build_report_agent, report_spec
+from .agent import AGENT_NAME, SYSTEM_PROMPT, build_skr_agent, report_spec
 from .sources import (
     Article,
     BomSource,
@@ -9,8 +9,9 @@ from .sources import (
 )
 
 __all__ = [
+    "AGENT_NAME",
     "SYSTEM_PROMPT",
-    "build_report_agent",
+    "build_skr_agent",
     "report_spec",
     "Article",
     "Company",

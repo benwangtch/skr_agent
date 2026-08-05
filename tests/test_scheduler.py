@@ -1,5 +1,5 @@
 """Scheduler tests. No credentials needed — jobs run against a stub agent
-that never touches the Claude Agent SDK, since the scheduler's job is timing
+that never touches the agent framework, since the scheduler's job is timing
 and lifecycle, not model behavior (that's DeepAgent's job, tested elsewhere)."""
 
 from __future__ import annotations

@@ -7,8 +7,7 @@
     uv run python examples/run_report.py --dry-run         # research only, no publish
     uv run python examples/run_report.py --reader-only     # exercise the refusal path
 
-Needs credentials for the Claude Agent SDK (ANTHROPIC_API_KEY, or an
-`ant auth login` profile).
+Needs LLM credentials — set LLM_API_KEY in .env (see .env.example).
 """
 
 from __future__ import annotations

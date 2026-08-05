@@ -1,9 +1,9 @@
 """Turning agents into tools, and keeping track of who exists.
 
-This is the piece that makes "copilot calls the wiki coordinator" and "the
-report agent calls the wiki coordinator" the same mechanism rather than two
-integrations. It is also the seed of the skills-sharing platform: a registry of
-named capabilities that can be listed, described, and handed to a model.
+This is what lets one agent be handed to another as a single tool rather than
+as a bespoke integration. It is also the seed of the skills-sharing platform: a
+registry of named capabilities that can be listed, described, and handed to a
+model.
 """
 
 from __future__ import annotations
@@ -12,7 +12,7 @@ import json
 import logging
 from typing import Any, Callable, Iterable
 
-from claude_agent_sdk import create_sdk_mcp_server, tool
+from langchain_core.tools import BaseTool, StructuredTool
 
 from .protocol import (
     AgentRequest,
@@ -24,7 +24,7 @@ from .protocol import (
 
 log = logging.getLogger(__name__)
 
-__all__ = ["AgentRegistry", "agent_as_tool", "agents_as_toolserver"]
+__all__ = ["AgentRegistry", "agent_as_tool", "agents_as_tools"]
 
 
 class AgentRegistry:
@@ -66,17 +66,17 @@ class AgentRegistry:
 
 
 # --------------------------------------------------------------------------
-# Agent -> SDK tool
+# Agent -> tool
 # --------------------------------------------------------------------------
 
 
-def _render(response: AgentResponse) -> dict[str, Any]:
-    """Format an AgentResponse as MCP tool output.
+def _render(response: AgentResponse) -> str:
+    """Format an AgentResponse as tool output.
 
     Citations are rendered inline rather than dropped, because the calling
     model needs them to attribute its own answer. A refusal is returned as
-    ordinary text with ``is_error`` set — the caller should see *why* it was
-    refused and adapt, not treat it as a transport failure.
+    ordinary text — the caller should see *why* it was refused and adapt, not
+    treat it as a transport failure.
     """
     parts: list[str] = []
     if response.output:
@@ -90,11 +90,9 @@ def _render(response: AgentResponse) -> dict[str, Any]:
             lines.append(f"- [{c.kind}] {label} ({c.ref})")
         parts.append("\n".join(lines))
     text = "\n\n".join(parts) or f"(no output, status={response.status})"
-
-    block: dict[str, Any] = {"content": [{"type": "text", "text": text}]}
     if not response.ok:
-        block["is_error"] = True
-    return block
+        text = f"[{response.status}] {text}"
+    return text
 
 
 def agent_as_tool(
@@ -104,18 +102,19 @@ def agent_as_tool(
     parent: str,
     max_turns: int | None = None,
     on_response: Callable[[AgentResponse], None] | None = None,
-):
+) -> BaseTool:
     """Expose an agent to a *calling* model as a single tool.
 
     The principal is closed over at construction time rather than passed as a
-    tool argument. That is the whole trick: a model cannot escalate by writing a
-    different ``division`` into the tool call, because the field does not exist
-    in the schema. Tools are therefore built per request, not once at import.
+    tool argument. That is the whole trick: a model cannot escalate by writing
+    a different ``division`` into the tool call, because the field does not
+    exist in the schema. Tools are therefore built per request, not once at
+    import.
     """
 
-    async def _invoke(args: dict[str, Any]) -> dict[str, Any]:
-        task = args.get("task", "")
-        inputs = {k: v for k, v in args.items() if k != "task"}
+    async def _invoke(**kwargs: Any) -> str:
+        task = kwargs.get("task", "")
+        inputs = {k: v for k, v in kwargs.items() if k != "task" and v is not None}
         request = AgentRequest(
             principal=principal,
             task=task,
@@ -139,28 +138,23 @@ def agent_as_tool(
             on_response(response)
         return _render(response)
 
-    _invoke.__name__ = spec.name
-    return tool(spec.name, spec.description, spec.input_schema)(_invoke)
+    return StructuredTool.from_function(
+        coroutine=_invoke,
+        name=spec.name,
+        description=spec.description,
+        args_schema=spec.input_schema,
+    )
 
 
-def agents_as_toolserver(
+def agents_as_tools(
     specs: Iterable[AgentSpec],
     *,
     principal: Principal,
     parent: str,
-    server_name: str = "agents",
     on_response: Callable[[AgentResponse], None] | None = None,
-):
-    """Bundle several agents into one in-process MCP server.
-
-    Returns ``(server_config, allowed_tool_names)`` so the caller can pass both
-    straight into ``ClaudeAgentOptions``.
-    """
-    specs = list(specs)
-    tools = [
+) -> list[BaseTool]:
+    """Bundle several agents into a list of tools ready to hand to an agent."""
+    return [
         agent_as_tool(s, principal=principal, parent=parent, on_response=on_response)
         for s in specs
     ]
-    server = create_sdk_mcp_server(name=server_name, version="1.0.0", tools=tools)
-    names = [f"mcp__{server_name}__{s.name}" for s in specs]
-    return server, names

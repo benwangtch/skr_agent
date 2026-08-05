@@ -6,7 +6,7 @@ import json
 
 import pytest
 
-from skr_agent.mesh import AgentRegistry, agent_as_tool, agents_as_toolserver
+from skr_agent.mesh import AgentRegistry, agent_as_tool, agents_as_tools
 from skr_agent.protocol import (
     AgentRequest,
     AgentResponse,
@@ -28,10 +28,9 @@ def spec_returning(response: AgentResponse, *, name="echo") -> AgentSpec:
     return AgentSpec(name=name, description="test agent", handler=handler)
 
 
-async def call(tool_obj, args: dict) -> dict:
-    """Invoke the underlying coroutine of an SDK tool object."""
-    handler = getattr(tool_obj, "handler", None) or tool_obj
-    return await handler(args)
+async def call(tool_obj, args: dict) -> str:
+    """Invoke a LangChain tool and return the text the calling model sees."""
+    return await tool_obj.ainvoke(args)
 
 
 class TestPrincipalBinding:
@@ -78,10 +77,10 @@ class TestPrincipalBinding:
         t = agent_as_tool(
             AgentSpec(name="probe", description="d", handler=handler),
             principal=ALICE,
-            parent="wiki_report",
+            parent="skr_agent",
         )
         await call(t, {"task": "go"})
-        assert seen[0].parent_agent == "wiki_report"
+        assert seen[0].parent_agent == "skr_agent"
 
 
 class TestRendering:
@@ -95,25 +94,24 @@ class TestRendering:
             ),
         )
         t = agent_as_tool(spec_returning(response), principal=ALICE, parent="copilot")
-        out = await call(t, {"task": "who supplies ASC-4400?"})
-        text = out["content"][0]["text"]
+        text = await call(t, {"task": "who supplies ASC-4400?"})
         assert "Acme is sole source." in text
         assert "supply/acme" in text
         assert "rpt-1" in text
-        assert not out.get("is_error")
+        assert not text.startswith("[")
 
     async def test_structured_data_is_rendered_as_json(self):
         response = AgentResponse(status="ok", output="ok", data={"ref": "supply/x"})
         t = agent_as_tool(spec_returning(response), principal=ALICE, parent="copilot")
-        text = (await call(t, {"task": "t"}))["content"][0]["text"]
+        text = await call(t, {"task": "t"})
         assert '"ref": "supply/x"' in text
 
     async def test_refusal_is_an_error_result_with_the_reason_intact(self):
         response = AgentResponse.refuse("alice may not read namespace 'finance'")
         t = agent_as_tool(spec_returning(response), principal=ALICE, parent="copilot")
-        out = await call(t, {"task": "t"})
-        assert out["is_error"] is True
-        assert "may not read namespace" in out["content"][0]["text"]
+        text = await call(t, {"task": "t"})
+        assert text.startswith("[refused]")
+        assert "may not read namespace" in text
 
     async def test_denied_exception_becomes_a_refusal_not_a_crash(self):
         async def handler(request: AgentRequest) -> AgentResponse:
@@ -124,9 +122,9 @@ class TestRendering:
             principal=ALICE,
             parent="copilot",
         )
-        out = await call(t, {"task": "t"})
-        assert out["is_error"] is True
-        assert "nope" in out["content"][0]["text"]
+        text = await call(t, {"task": "t"})
+        assert text.startswith("[refused]")
+        assert "nope" in text
 
     async def test_unexpected_exception_is_surfaced_not_swallowed(self):
         async def handler(request: AgentRequest) -> AgentResponse:
@@ -137,9 +135,9 @@ class TestRendering:
             principal=ALICE,
             parent="copilot",
         )
-        out = await call(t, {"task": "t"})
-        assert out["is_error"] is True
-        assert "backend down" in out["content"][0]["text"]
+        text = await call(t, {"task": "t"})
+        assert text.startswith("[failed]")
+        assert "backend down" in text
 
 
 class TestCitationHarvest:
@@ -152,7 +150,7 @@ class TestCitationHarvest:
         t = agent_as_tool(
             spec_returning(response),
             principal=ALICE,
-            parent="wiki_report",
+            parent="skr_agent",
             on_response=lambda r: harvested.extend(r.citations),
         )
         await call(t, {"task": "t"})
@@ -171,14 +169,16 @@ class TestRegistry:
         registry.register(spec_returning(AgentResponse(status="ok"), name="a"))
         assert "a: test agent" in registry.catalog()
 
-    def test_toolserver_names_are_mcp_qualified(self):
-        _, names = agents_as_toolserver(
-            [spec_returning(AgentResponse(status="ok"), name="wiki_ask")],
+    def test_agents_become_tools_named_after_themselves(self):
+        tools = agents_as_tools(
+            [
+                spec_returning(AgentResponse(status="ok"), name="wiki_ask"),
+                spec_returning(AgentResponse(status="ok"), name="skr_agent"),
+            ],
             principal=ALICE,
             parent="copilot",
-            server_name="wiki",
         )
-        assert names == ["mcp__wiki__wiki_ask"]
+        assert [t.name for t in tools] == ["wiki_ask", "skr_agent"]
 
 
 class TestBudget:
@@ -189,11 +189,11 @@ class TestBudget:
 
     def test_delegate_carries_principal_and_trace(self):
         request = AgentRequest(principal=ALICE, task="parent task", budget=Budget(max_turns=10))
-        child = request.delegate("child task", agent="wiki_report", max_turns=4)
+        child = request.delegate("child task", agent="skr_agent", max_turns=4)
         assert child.principal is ALICE
         assert child.trace_id == request.trace_id
         assert child.budget.max_turns == 4
-        assert child.parent_agent == "wiki_report"
+        assert child.parent_agent == "skr_agent"
 
 
 class TestPrincipalHygiene:
