@@ -14,6 +14,11 @@ like (checked against source, not the README).
 covers the env-driven config layer, the A2A server, and the scheduler.
 [`docs/design/02-package-management.md`](docs/design/02-package-management.md)
 covers why uv over pip and where dev dependencies live.
+[`docs/design/03-agent-architecture-and-serving.md`](docs/design/03-agent-architecture-and-serving.md)
+ties it together: the coordinator framework, the two ways agents talk to each
+other (in-process `agent_as_tool` vs. cross-process A2A), how A2A serving
+works end to end, and how the scheduler and the A2A server share one mesh in
+one process.
 [`docs/RUNBOOK.md`](docs/RUNBOOK.md) is the operational doc — every command to
 run this locally and a step-by-step manual end-to-end verification pass (the
 kind that actually calls the model, unlike the test suite below).
