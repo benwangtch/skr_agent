@@ -26,6 +26,7 @@ src/skr_agent/config/
   __init__.py    匯出所有 class + get_* 函式 + reset_settings_cache()
   base.py        BaseConfig
   llm.py         LLM（真的有接上）
+  mcp.py         MCP（真的有接上，預設關閉）
   db.py          DB（佔位，還沒有東西在用）
   minio.py       Minio（佔位）
 ```
@@ -102,7 +103,31 @@ uv run python -c "from skr_agent.config import get_llm; l=get_llm(); print(l.pro
 
 ---
 
-## 3. 快取與測試
+## 3. MCP——外部 tool server
+
+skr agent 可以把公司內部的 MCP service 當成第四個資料來源（BOM / 新聞 / wiki 之外）。**預設完全關閉**：`MCP_*` 一個都沒設的話 `connections()` 回傳 `{}`，agent 的 tool 清單跟以前一模一樣，不會嘗試連任何地方。這是刻意的——MCP server 是一個活的相依，連不上就會改變 agent 的 tool 形狀，所以只在有人明確設定時才出現。
+
+**單一 server（常見情況）**：
+
+```bash
+MCP_URL=https://mcp.internal.corp/mcp
+MCP_TOKEN=內部服務發的憑證          # 送出時是 Authorization: Bearer <token>
+# MCP_TRANSPORT=streamable_http    # 預設值；舊的 HTTP transport 用 sse
+```
+
+**多個 server，或本機 stdio server**：用 `MCP_SERVERS`，內容是 JSON，直接傳給 `MultiServerMCPClient`：
+
+```bash
+MCP_SERVERS={"risk":{"transport":"streamable_http","url":"https://risk.internal/mcp"},"local":{"transport":"stdio","command":"python","args":["/path/to/server.py"]}}
+```
+
+兩者都設的時候 **`MCP_SERVERS` 整組蓋過 `MCP_URL`，不是合併**——一個合併到一半的連線設定比一個明顯被忽略的環境變數難除錯得多。
+
+實作細節與取捨在 `03-agent-architecture-and-serving.md` §3.4。
+
+---
+
+## 4. 快取與測試
 
 每個 `get_*()` 都是 `lru_cache` 的 process-lifetime singleton——呼叫端可以在每個 request 讀它，不用擔心重複解析環境變數。
 
@@ -110,7 +135,7 @@ uv run python -c "from skr_agent.config import get_llm; l=get_llm(); print(l.pro
 
 ---
 
-## 4. 已知限制
+## 5. 已知限制
 
 1. **`db.py` / `minio.py` 是佔位**，沒有任何程式碼在用它們。它們存在是為了示範 pattern（以及讓「新增一個服務要抄哪個檔案」有答案）。
 2. **沒有設定驗證的整合測試。** `test_config.py` 驗的是「provider 預設值、env var 覆蓋、chat model 建出來的形狀」，不會真的連線——所以「這個 base_url 真的活著」這件事只有在真的跑一次 agent 時才會知道。

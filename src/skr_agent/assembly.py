@@ -9,10 +9,11 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from pathlib import Path
+from typing import Sequence
 
 from .mesh import AgentRegistry
 from .report import FixtureBom, FixtureNewsFeed, build_skr_agent
-from .runtime import DeepAgent
+from .runtime import DeepAgent, ToolsetFactory
 from .wiki import InMemoryWikiBackend, WikiAuthorizer, WikiBackend, WikiCoordinator
 
 __all__ = ["Mesh", "build_mesh"]
@@ -35,6 +36,7 @@ def build_mesh(
     project_root: str | Path,
     model: str | None = None,
     with_wiki_agent: bool = False,
+    extra_toolsets: Sequence[ToolsetFactory] = (),
 ) -> Mesh:
     """Build skr agent and its data sources against fixture data.
 
@@ -43,6 +45,12 @@ def build_mesh(
     fewer model hop and loses nothing. Set it to ``True`` to also register the
     LLM-backed ``wiki_ask`` — worth doing only if the wiki team takes ownership
     of retrieval quality (query rewriting, reranking, multi-hop) behind it.
+
+    ``extra_toolsets`` mounts additional data sources on the report agent —
+    this is how MCP servers get in (see ``skr_agent.mcp``). It is a parameter
+    rather than something this function loads itself because MCP discovery is
+    async and this is not: the caller loads once at startup and passes the
+    result down. ``examples/run_report.py`` and ``serving/service.py`` both do.
 
     Swap ``InMemoryWikiBackend`` for the real wiki client and
     ``FixtureNewsFeed`` for real search; nothing else here changes.
@@ -59,6 +67,7 @@ def build_mesh(
         wiki_authz=authz,
         project_root=project_root,
         model=model,
+        extra_toolsets=extra_toolsets,
     )
 
     registry = AgentRegistry()

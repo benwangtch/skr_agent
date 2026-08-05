@@ -18,6 +18,7 @@ import logging
 from pathlib import Path
 
 from skr_agent import Budget, build_mesh
+from skr_agent.mcp import mcp_toolset_from_config
 from skr_agent.principals import service_principal, user_principal
 from skr_agent.protocol import AgentRequest
 
@@ -44,7 +45,14 @@ async def main() -> None:
         format="%(levelname)s %(name)s %(message)s",
     )
 
-    mesh = build_mesh(fixtures=ROOT / "fixtures", project_root=ROOT)
+    mcp_toolset = await mcp_toolset_from_config()
+    if mcp_toolset:
+        print("→ MCP tools loaded from configured server(s)")
+    mesh = build_mesh(
+        fixtures=ROOT / "fixtures",
+        project_root=ROOT,
+        extra_toolsets=[mcp_toolset] if mcp_toolset else (),
+    )
 
     if args.scheduled:
         principal = service_principal()

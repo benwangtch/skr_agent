@@ -17,6 +17,7 @@ from pathlib import Path
 import uvicorn
 
 from ..assembly import build_mesh
+from ..mcp import mcp_toolset_from_config
 from ..principals import service_principal
 from ..protocol import Budget
 from .a2a import build_a2a_app
@@ -61,7 +62,15 @@ async def run(
 ) -> None:
     """Build the mesh, then run the A2A server and the scheduler concurrently
     until either one stops (normally: never — this is a foreground service)."""
-    mesh = build_mesh(fixtures=fixtures, project_root=project_root)
+    # MCP discovery is a network round trip, so it happens once here rather
+    # than per request. No MCP configured -> None -> the agent's surface is
+    # unchanged. See skr_agent.mcp.
+    mcp_toolset = await mcp_toolset_from_config()
+    mesh = build_mesh(
+        fixtures=fixtures,
+        project_root=project_root,
+        extra_toolsets=[mcp_toolset] if mcp_toolset else (),
+    )
 
     base_url = f"http://{host}:{port}/"
     # a2a-sdk 1.x returns a ready FastAPI app; there is no .build() step.

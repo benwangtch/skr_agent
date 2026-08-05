@@ -18,12 +18,12 @@ service account sees across divisions, a user sees their own. See
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Any
+from typing import Any, Sequence
 
 from langchain_core.tools import BaseTool
 
 from ..protocol import AgentSpec
-from ..runtime import DeepAgent, ToolContext
+from ..runtime import DeepAgent, ToolContext, ToolsetFactory
 from ..wiki.authz import WikiAuthorizer
 from ..wiki.backend import WikiBackend
 from ..wiki.tools import make_wiki_toolset
@@ -33,6 +33,9 @@ from .tools import make_bom_toolset, make_news_toolset
 __all__ = ["build_skr_agent", "SYSTEM_PROMPT", "AGENT_NAME"]
 
 AGENT_NAME = "skr_agent"
+
+DEFAULT_SKILLS = ("incident-report",)
+"""Skill directories under ``.claude/skills/`` inlined into the prompt."""
 
 INVESTIGATOR_TOOLS = (
     "get_bom_company",
@@ -143,8 +146,19 @@ def build_skr_agent(
     project_root: str | Path,
     model: str | None = None,
     max_turns: int = 60,
+    skills: Sequence[str] = DEFAULT_SKILLS,
+    extra_toolsets: Sequence[ToolsetFactory] = (),
 ) -> DeepAgent:
-    """Wire up skr agent with its sources, subagent, and report rubric."""
+    """Wire up skr agent with its sources, subagent, and report rubric.
+
+    ``skills`` names directories under ``.claude/skills/``; each one's
+    ``SKILL.md`` body is inlined into the system prompt (see ``runtime.py`` for
+    why inlined rather than progressively disclosed). Add a skill by dropping
+    the directory in and naming it here.
+
+    ``extra_toolsets`` adds data sources beyond the three built in — MCP
+    servers arrive this way (``skr_agent.mcp``).
+    """
 
     def subagents(ctx: ToolContext, tools: dict[str, BaseTool]) -> list[dict[str, Any]]:
         # Read-only by construction: the investigator is handed a subset that
@@ -159,6 +173,12 @@ def build_skr_agent(
                     "sweeping several companies."
                 ),
                 "system_prompt": INVESTIGATOR_PROMPT,
+                # An explicit allowlist, not "everything except the write
+                # tool": a tool added later is excluded until someone names it
+                # here. That is why MCP tools do not reach the investigator --
+                # nothing tells us which of them mutate state, and this
+                # subagent is meant to be read-only by construction. Name one
+                # here to opt it in once you know it is safe.
                 "tools": [tools[n] for n in INVESTIGATOR_TOOLS if n in tools],
             }
         ]
@@ -176,9 +196,10 @@ def build_skr_agent(
             make_bom_toolset(bom),
             make_news_toolset(news),
             make_wiki_toolset(wiki_backend, wiki_authz, writable=True),
+            *extra_toolsets,
         ],
         subagents=subagents,
-        skills=["incident-report"],
+        skills=list(skills),
         project_root=project_root,
         model=model,
         max_turns=max_turns,

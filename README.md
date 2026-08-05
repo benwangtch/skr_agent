@@ -6,17 +6,18 @@ supply-chain questions, decides for itself how deep to dig, cross-references
 several data sources, and publishes a sourced report. It is servable over
 **A2A** (with streaming) and runnable on a **cron-like schedule**.
 
-Its data sources are peers: the **bill of materials**, **external news**, and
-the **internal wiki**. The wiki gets its own module only because it is the one
-source with an authorization model to enforce.
+Its data sources are peers: the **bill of materials**, **external news**, the
+**internal wiki**, and any **MCP servers** you point it at. The wiki gets its
+own module only because it is the one source with an authorization model to
+enforce.
 
 Design docs, in reading order:
 
 | | |
 |---|---|
-| [`03-agent-architecture-and-serving.md`](docs/design/03-agent-architecture-and-serving.md) | **Start here.** The framework: why `deepagents`, why the report rubric is inlined rather than progressively disclosed, why `a2a-sdk` is pinned to 1.1.2, the two ways callers reach the agent, and how the scheduler and A2A server share one process. |
-| [`00-architecture.md`](docs/design/00-architecture.md) | The input side: the three data sources, why the wiki is a toolset rather than an agent, and how scheduled vs. user-triggered runs get different clearance through different principals. |
-| [`01-config.md`](docs/design/01-config.md) | The env-driven config layer and how to point it at an internal LLM gateway. |
+| [`03-agent-architecture-and-serving.md`](docs/design/03-agent-architecture-and-serving.md) | **Start here.** The framework: why `deepagents`, why the report rubric is inlined rather than progressively disclosed, why `a2a-sdk` is pinned to 1.1.2, the two ways callers reach the agent, how MCP servers plug in, and how the scheduler and A2A server share one process. |
+| [`00-architecture.md`](docs/design/00-architecture.md) | The input side: the data sources, why the wiki is a toolset rather than an agent, and how scheduled vs. user-triggered runs get different clearance through different principals. |
+| [`01-config.md`](docs/design/01-config.md) | The env-driven config layer: pointing it at an internal LLM gateway, and at your MCP servers. |
 | [`02-package-management.md`](docs/design/02-package-management.md) | Why uv over pip, and where dev dependencies live. |
 [`docs/RUNBOOK.md`](docs/RUNBOOK.md) is the operational doc — every command to
 run this locally and a step-by-step manual end-to-end verification pass (the
@@ -31,9 +32,11 @@ src/skr_agent/
   runtime.py       DeepAgent — thin shell over deepagents/LangGraph, config-driven
   principals.py    service_principal() vs user_principal() — who triggers a run
   assembly.py      wiring; the only module that knows about all the others
+  mcp.py           ★ MCP servers as a data source (off unless configured)
   config/
     base.py          BaseConfig — every IO-service config inherits this
     llm.py           ★ which chat model the agent runs on (any LangChain provider)
+    mcp.py           ★ which MCP servers to connect
     db.py            placeholder, same pattern, nothing uses it yet
     minio.py         placeholder, same pattern, nothing uses it yet
   wiki/              one data source — the only one with an authz model
@@ -79,6 +82,17 @@ works. `LLM_PROVIDER=custom` + `LLM_BASE_URL` points at any internal gateway
 exposing an OpenAI-compatible `/v1/chat/completions`, which is what vLLM,
 LiteLLM and most corporate proxies expose — no protocol translation needed.
 
+To let the agent call your own **MCP service**, set `MCP_URL` (and `MCP_TOKEN`
+if it needs auth) — see `.env.example`. Nothing connects anywhere unless you
+do. One caveat worth reading before you point it at anything sensitive: the
+triggering user's identity is **not** forwarded to the MCP server, so every
+call arrives as the same service account. `docs/RUNBOOK.md` §3.7 has the
+verification steps and the full caveat.
+
+To add your own **skill** (a rubric the agent must follow every run): drop
+`.claude/skills/<name>/SKILL.md` in and add the name to `DEFAULT_SKILLS` in
+`src/skr_agent/report/agent.py`. RUNBOOK §3.8.
+
 The test suite needs no credentials at all.
 
 ## Run it
@@ -117,7 +131,7 @@ scheduler survive running together).
 ## Test
 
 ```bash
-uv run pytest              # 139 tests, no credentials required
+uv run pytest              # 158 tests, no credentials required
 ```
 
 Coverage: namespace authorization, clearance-gated namespaces, the
@@ -131,6 +145,11 @@ principal resolution, streaming progress, task lifecycle and file artifacts —
 plus six integration tests driving a real HTTP round trip through the wired
 app, which is the layer that caught a bug the executor unit tests structurally
 could not (`03-agent-architecture-and-serving.md` §4.3).
+
+The MCP tests run a real MCP server subprocess (`tests/mcp_fixture_server.py`)
+rather than mocking the client, since the contract with
+`langchain-mcp-adapters` is the part that can actually break; skip them with
+`-m "not mcp_server"`.
 
 The suite uses stubs and never calls a model. The framework migration was
 additionally driven end to end against a local OpenAI-compatible stub server

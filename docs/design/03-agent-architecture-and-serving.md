@@ -18,6 +18,7 @@ skr agent 是一個 deep research agent：它接開放式問題，自己決定�
 | Skill（報告規範）怎麼載入？ | **直接 inline 進 system prompt**，不用 `create_deep_agent(skills=...)` | 那個參數是 progressive disclosure（模型自己決定要不要 `read_file` 去讀），對「每次都必須遵守的規範」是錯的取捨——見 §2.3 |
 | 外部怎麼呼叫 skr agent？ | 兩種機制，依「是否跨 process」二選一 | 同 process 用 `agent_as_tool`；跨 process 用 A2A——見 §3 |
 | A2A SDK 用哪個版本？ | **`a2a-sdk` 1.1.2**（釘死；1.1.2 是最新的 1.x，沒有 1.2/1.3） | 這個套件 API 變動很兇，0.3.x→1.x 是大改名 + 換 protobuf 型別——見 §4.1 |
+| 外部 MCP service 怎麼接？ | 當成第四個資料來源，啟動時載入一次 | tool 本來就是 LangChain tool；但**身份不會傳過去**，這是硬限制——見 §3.4 |
 | 排程怎麼實作？ | 自寫的 in-process `Scheduler` | 排程要跟 A2A server 共用同一份資料來源連線與 principal 邏輯，接第二個代管平台換不到什麼——見 §5 |
 | A2A server 跟排程是不是分開部署？ | 不是，同一個 process、同一個 `asyncio.gather` | 兩者都只是「誰觸發 `skr_agent.run()`」的不同入口——見 §6 |
 
@@ -137,6 +138,34 @@ skr agent 同時被 serve 成一個獨立的 A2A server（`serving/a2a.py`），
 | 呼叫方是誰 | 一定是另一個模型的 tool call | 任何會講 A2A 的 client（模型或非模型） |
 
 **不要為了「以防萬一要跨 process」而讓 in-process 呼叫也走 HTTP**——`agent_as_tool` 的 closure 身份綁定，是 HTTP 版本必須用 token 重新驗證才能達到的等價保證，同 process 內繞這一圈沒有安全性上的好處，只有延遲上的壞處。
+
+### 3.4 MCP server——第四種資料來源
+
+公司內部的 MCP service 可以直接掛成 skr agent 的 tool（`skr_agent/mcp.py`，設定見 `01-config.md` §3）。MCP 的 tool 本來就是 LangChain tool，所以要做的只有兩件事——把它接進這個 codebase 的兩個慣例。
+
+**1. 載入是 async，toolset factory 是 sync。** `ToolsetFactory` 每個 request 呼叫一次、同步回傳 tools，但問一個 MCP server 有哪些 tool 要走一次網路。所以 tool **在 process 啟動時載入一次**，factory 只是把已經載好的物件發出去：
+
+```python
+# serving/service.py::run() 和 examples/run_report.py 都是這個形狀
+mcp_toolset = await mcp_toolset_from_config()     # 啟動時一次
+mesh = build_mesh(..., extra_toolsets=[mcp_toolset] if mcp_toolset else ())
+```
+
+每次 **呼叫** 仍然各自開一個 session，所以長時間跑的 process 不會一直佔著連線。代價是：**server 之後新增的 tool 要重啟才看得到。**
+
+`build_mesh()` 沒有自己去載 MCP，而是收一個 `extra_toolsets` 參數，就是因為它是同步函式而載入是非同步的——把 async 的部分留在呼叫端，比讓整條組裝鏈都變成 async 乾淨。
+
+**2. 連不上就降級，不是讓 process 起不來。** 某個 server 沒回應時記一行 log 跳過它。一個輔助資料來源掛掉應該讓 agent 少幾個 tool，不是讓它整個起不來。所以「我預期的 tool 不見了」的第一個檢查點是 log 裡的 `mcp.load_failed`。
+
+**MCP tool 會產生 citation。** 每個 MCP tool 都包了一層，呼叫時記一筆 `mcp://<server>/<tool>` 的 `Citation`，跟讀 wiki 頁面一樣。agent 的 prompt 要求「每個事實都要有出處」，那 MCP 來的資料就得有東西可以指——包裝層保留原本的 name/description/schema，模型看到的還是 server 宣告的那個 tool。
+
+**MCP tool 不會給 subagent。** `company-investigator` 拿的是一份寫死的白名單（`INVESTIGATOR_TOOLS`），這個 subagent 的設計是**建構上唯讀**——而我們無從得知某個 MCP tool 會不會改狀態。確認某個 tool 安全之後，把名字加進那份白名單就能開放。
+
+**⚠️ 身份不會傳過去。** 這是這個整合最重要的限制，值得單獨講：這個 codebase 裡其他每一個 tool 都 closure 綁著呼叫者的 `Principal`，並且對它做授權。MCP tool 做不到——憑證是**連線層級**的（`MCP_TOKEN`），所以從 MCP server 的角度看，不管是誰觸發這次執行，每個呼叫都長得像同一個 service account。
+
+實際後果：**只接「這個 agent 權限最低的呼叫者也可以看到全部內容」的 MCP server。** 如果那個 service 本身有 per-user 規則，它需要的是終端使用者的 token，而這個模組要改成 per-request 建 client 才能帶——目前沒做。
+
+---
 
 ---
 

@@ -12,6 +12,8 @@ dependencies = [
     "fastapi>=0.110",
     "uvicorn[standard]>=0.30",
     "croniter>=2.0",
+    "langchain-mcp-adapters>=0.3.1",
+    "mcp>=1.24,<2",
 ]
 
 [dependency-groups]
@@ -27,3 +29,8 @@ where = ["src"]
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
 testpaths = ["tests"]
+markers = [
+    # Spawns a real MCP server subprocess (tests/mcp_fixture_server.py).
+    # Still credential-free and offline; `-m "not mcp_server"` skips them.
+    "mcp_server: exercises a live MCP server over stdio",
+]

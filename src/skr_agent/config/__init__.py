@@ -15,6 +15,7 @@ from __future__ import annotations
 from .base import BaseConfig
 from .db import DB, get_db
 from .llm import LLM, get_llm
+from .mcp import MCP, get_mcp
 from .minio import Minio, get_minio
 
 __all__ = [
@@ -23,6 +24,8 @@ __all__ = [
     "get_llm",
     "DB",
     "get_db",
+    "MCP",
+    "get_mcp",
     "Minio",
     "get_minio",
     "reset_settings_cache",
@@ -38,4 +41,5 @@ def reset_settings_cache() -> None:
     """
     get_llm.cache_clear()
     get_db.cache_clear()
+    get_mcp.cache_clear()
     get_minio.cache_clear()

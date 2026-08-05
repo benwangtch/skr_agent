@@ -21,7 +21,7 @@ fixtures/                              4 家公司、5 頁 wiki（namespace: sup
 examples/
   run_report.py                        單次執行 skr agent（掃描或單一提問）
   run_service.py                       同時跑 A2A server + 排程
-tests/                                 139 個測試，6 個檔案，全部不需要金鑰
+tests/                                 158 個測試，6 個檔案，全部不需要金鑰
 ```
 
 ---
@@ -55,7 +55,7 @@ uv run python -c "from skr_agent.config import get_llm; l=get_llm(); print(l.pro
 ## 2. 跑單元測試（不花錢、不用金鑰）
 
 ```bash
-uv run pytest              # 139 個測試，約 3 秒
+uv run pytest              # 158 個測試，約 3 秒
 uv run pytest -q tests/test_wiki_authz.py     # 只跑某個檔案
 uv run pytest -k aggregation                  # 只跑名字符合的測試
 ```
@@ -67,6 +67,7 @@ uv run pytest -k aggregation                  # 只跑名字符合的測試
 | `test_wiring.py`（21） | 每個 agent 的 tool 清單、subagent 拿不到 write tool、報告規範真的進 prompt |
 | `test_config.py`（22） | LLM config 的 provider 預設值、env var 覆蓋、chat model 建構 |
 | `test_scheduler.py`（19） | cron 排程時序、job 失敗互不影響、hook 觸發 |
+| `test_mcp.py`（17） | MCP 設定解析、連不上時的降級、對真的 MCP server 載 tool／呼叫／記 citation |
 | `test_a2a_server.py`（32） | A2A executor 的 principal 解析、streaming 進度、task 生命週期、file artifact，加 6 個走真的 handler + HTTP 的整合測試 |
 
 **這些測試在改動任何一行程式碼後都該先過。** 它們用 stub agent（假的、瞬間回應、不呼叫模型）驗證系統的接線邏輯——如果這裡壞了，接上真的模型也不會變好，先把這層修好再往下走。
@@ -207,6 +208,98 @@ scheduler.fire job=weekly-bom-sweep agent=skr_agent trace=...
 
 ---
 
+## 3.7 接上你自己的 MCP service
+
+設定在 `.env`（細節見 `docs/design/01-config.md` §3）：
+
+```bash
+MCP_URL=https://mcp.internal.corp/mcp
+MCP_TOKEN=內部服務發的憑證
+```
+
+**先確認 tool 真的載得到，不必叫模型、不花 token：**
+
+```bash
+uv run python -c "
+import asyncio; from skr_agent.mcp import load_mcp_tools
+for s, t in asyncio.run(load_mcp_tools()):
+    print(f'{s}: {t.name} — {t.description[:70]}')
+"
+```
+
+沒有輸出代表兩種可能，要分清楚：
+
+| 現象 | 意思 | 怎麼辦 |
+|---|---|---|
+| 完全沒輸出，也沒有 log | `MCP_*` 沒設到，`connections()` 是空的 | 檢查 `.env` 有沒有被讀到：`uv run python -c "from skr_agent.config import get_mcp; print(get_mcp().connections())"` |
+| log 有 `mcp.load_failed` | 有設定但連不上／認證失敗 | 看那行 exception。連不上是**跳過**不是致命錯，所以 agent 還是會起來，只是少了那些 tool |
+
+**接著跑一次真的 agent**，確認模型看得到、也會用：
+
+```bash
+uv run python examples/run_report.py --ask "<一個需要用到你 MCP tool 的問題>" -v
+```
+
+預期：開頭印出 `→ MCP tools loaded from configured server(s)`，最後的 `--- citations ---` 區塊裡有 `mcp://<server>/<tool>` 這種 ref——**那就是 MCP 真的被呼叫過的證據**，模型只是嘴上說有用不會產生這個 citation。
+
+如果 tool 載進來了但模型不用它，問題在描述不在接線：MCP server 給的 tool description 就是模型用來決定要不要呼叫的唯一依據，太模糊就不會被選中。
+
+`--- citations ---` 沒有 `mcp://` 但你認為應該有的時候，用 `-v` 看 log 裡有沒有 `mcp.loaded server=... tools=[...]`，先確認那個 tool 到底有沒有進到 agent 的 tool 清單。
+
+### 一個上線前必須知道的限制
+
+**MCP 呼叫不會帶上觸發者的身份。** `MCP_TOKEN` 是連線層級的服務憑證，所以不管是誰觸發這次執行（一般使用者 / 排程帳號 / A2A 呼叫方），MCP server 看到的都是同一個身份。
+
+也就是說：**只接「這個 agent 權限最低的使用者也可以看到全部內容」的 MCP server。** 如果那個 service 內部有 per-user 權限，現在這個接法會繞過它。細節見 `docs/design/03-agent-architecture-and-serving.md` §3.4。
+
+---
+
+## 3.8 放進你自己的 skill
+
+Skill 是「報告格式、判準」這類**每次跑都必須遵守**的規範。加一個新的：
+
+```bash
+mkdir -p .claude/skills/your-skill
+$EDITOR .claude/skills/your-skill/SKILL.md
+```
+
+`SKILL.md` 的格式（YAML frontmatter + markdown 本文）：
+
+```markdown
+---
+name: your-skill
+description: 一句話講這個 skill 管什麼
+---
+
+# 標題
+
+實際的規範內容。
+```
+
+然後在 `src/skr_agent/report/agent.py` 的 `DEFAULT_SKILLS` 加上名字：
+
+```python
+DEFAULT_SKILLS = ("incident-report", "your-skill")
+```
+
+驗證它真的進到 prompt（不花錢）：
+
+```bash
+uv run python -c "
+from pathlib import Path; from skr_agent import build_mesh
+m = build_mesh(fixtures='fixtures', project_root='.')
+p = m.report_agent._full_system_prompt()
+print('your-skill 在 prompt 裡:', 'your-skill' in p)
+print('prompt 長度:', len(p))
+"
+```
+
+**frontmatter 會被丟掉，只有本文進 prompt**——frontmatter 是給 skill catalog 用的 metadata，inline 進 prompt 只是浪費 token。
+
+**這些 skill 是整份塞進 system prompt 的，不是 progressive disclosure**（理由見 design doc §2.3：必須遵守的規範不該靠模型自己記得去讀檔）。代價是每一份 skill 的全文都佔 context——**skill 多到十幾份、而且大部分情況只有一兩份相關的時候，這個取捨就該翻轉**，改用 `create_deep_agent(skills=...)` 的按需載入。目前一兩份的規模，inline 是對的。
+
+---
+
 ## 4. 這樣算「測過」了嗎？
 
 跑完 §3 全部六步，代表確認過：
@@ -217,8 +310,9 @@ scheduler.fire job=weekly-bom-sweep agent=skr_agent trace=...
 - 排程帳號的跨部門彙整寫進 clearance 夠的 namespace，不會外洩（3.4）
 - Agent 會依問題類型選對 tool，不會對純內部查詢做整份掃描（3.5）
 - A2A server 跟排程可以在同一個 process 穩定跑，外部呼叫走得通（3.6）
+- （若有設定）MCP tool 載得到、模型會用、而且留下 `mcp://` citation（3.7）
 
-這六步涵蓋了 `docs/design/03-agent-architecture-and-serving.md` §8 列出的「已知限制」之外的核心行為。**沒有自動化的 e2e 測試**（§2 的 139 個測試都用 stub，不叫真的模型）——這是刻意的，因為每次 CI 跑都花 token、還會因為模型輸出的隨機性讓測試不穩定。真要把 §3 這幾步自動化，做法是寫一支跑在 CI 之外（例如手動觸發或排程跑一次）的 smoke test script，判準改成寬鬆的（例如「有沒有 citations」而不是「內容逐字符合」）——這份文件目前先提供人工跑過一遍的步驟，還沒做那支腳本。
+這六步涵蓋了 `docs/design/03-agent-architecture-and-serving.md` §8 列出的「已知限制」之外的核心行為。**沒有自動化的 e2e 測試**（§2 的 158 個測試都用 stub，不叫真的模型）——這是刻意的，因為每次 CI 跑都花 token、還會因為模型輸出的隨機性讓測試不穩定。真要把 §3 這幾步自動化，做法是寫一支跑在 CI 之外（例如手動觸發或排程跑一次）的 smoke test script，判準改成寬鬆的（例如「有沒有 citations」而不是「內容逐字符合」）——這份文件目前先提供人工跑過一遍的步驟，還沒做那支腳本。
 
 ## 5. 常見卡住的地方
 
@@ -231,3 +325,6 @@ scheduler.fire job=weekly-bom-sweep agent=skr_agent trace=...
 | A2A `curl` 回 method not found | 1.x 的 method 名是 `SendMessage` / `SendStreamingMessage`；`message/send` 是 0.3 的名字（不帶 header 時才走那條） | §3.6 |
 | 排程一直不觸發 | cron 表達式算的下一次時間比想像中晚——`*/5 * * * *` 最多等 5 分鐘，不是啟動時立刻跑（這是真正的 cron 語意，見 design doc §5） | §3.6 |
 | 想確認 wiki 真的被寫入，但 `list_namespaces()` 看不出新舊 | 用 `-v` 開 log，找 `wiki.write` 那行 | §3.2 |
+| MCP tool 沒出現在 agent 身上 | 分辨「沒設定」跟「連不上」——看 log 有沒有 `mcp.load_failed` | §3.7 |
+| MCP tool 載到了但模型不呼叫它 | tool description 太模糊；那是模型唯一的判斷依據 | §3.7 |
+| 改了 SKILL.md 但行為沒變 | 確認 skill 名字有加進 `DEFAULT_SKILLS`；沒加就不會被載 | §3.8 |

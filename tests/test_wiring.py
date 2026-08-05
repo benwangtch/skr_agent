@@ -179,3 +179,46 @@ class TestStructuredOutputParsing:
 
     def test_no_block_returns_empty(self):
         assert _extract_json("just prose") == {}
+
+
+class TestAddingYourOwnSkill:
+    """Adding a skill is: create `.claude/skills/<name>/SKILL.md`, then name it
+    in `skills=`. These lock down that the second one is treated like the first
+    -- inlined in full, not merely advertised."""
+
+    def test_a_second_skill_is_inlined_too(self, tmp_path):
+        from skr_agent.report import build_skr_agent
+        from skr_agent.report.sources import FixtureBom, FixtureNewsFeed
+        from skr_agent.wiki import InMemoryWikiBackend, WikiAuthorizer
+
+        skill_dir = tmp_path / ".claude" / "skills" / "house-style"
+        skill_dir.mkdir(parents=True)
+        (skill_dir / "SKILL.md").write_text(
+            "---\nname: house-style\ndescription: how we write\n---\n\n"
+            "# House style\n\nAlways lead with the risk.\n",
+            encoding="utf-8",
+        )
+        # The built-in skill has to exist under the same root to be found.
+        builtin = tmp_path / ".claude" / "skills" / "incident-report"
+        builtin.mkdir(parents=True)
+        (builtin / "SKILL.md").write_text("# Rubric\n\nSeverity rubric here.\n", encoding="utf-8")
+
+        agent = build_skr_agent(
+            bom=FixtureBom.from_fixtures(ROOT / "fixtures"),
+            news=FixtureNewsFeed.from_fixtures(ROOT / "fixtures"),
+            wiki_backend=InMemoryWikiBackend.from_fixtures(ROOT / "fixtures"),
+            wiki_authz=WikiAuthorizer(),
+            project_root=tmp_path,
+            skills=["incident-report", "house-style"],
+        )
+        prompt = agent._full_system_prompt()
+        assert "Always lead with the risk." in prompt
+        assert "Severity rubric here." in prompt
+
+    def test_a_missing_skill_fails_loudly_at_build_time(self, tmp_path):
+        """Better than a run that silently ignores the rubric it was told to
+        follow."""
+        from skr_agent.runtime import load_skill
+
+        with pytest.raises(FileNotFoundError):
+            load_skill(tmp_path, "no-such-skill")
