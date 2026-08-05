@@ -8,14 +8,15 @@ Once running:
     curl http://localhost:8000/.well-known/agent-card.json | jq
 
 Sending it a task needs an A2A client (a2a-sdk ships one) or a raw JSON-RPC
-POST to / -- every request MUST carry the `A2A-Version: 1.0` header, or the
-server rejects it with VERSION_NOT_SUPPORTED regardless of body shape:
+POST to /:
 
-    curl http://localhost:8000/ \\
-      -H 'Content-Type: application/json' -H 'A2A-Version: 1.0' \\
-      -d '{"jsonrpc":"2.0","id":"1","method":"SendMessage","params":{
-            "message":{"messageId":"m1","role":"ROLE_USER",
-                       "parts":[{"text":"what is our exposure on the ASC-4400?"}]}}}'
+    curl http://localhost:8000/ -H 'Content-Type: application/json' \\
+      -d '{"jsonrpc":"2.0","id":"1","method":"message/send","params":{
+            "message":{"messageId":"m1","role":"user",
+                       "parts":[{"kind":"text","text":"our ASC-4400 exposure?"}]}}}'
+
+Use "method":"message/stream" instead to receive progress events over SSE as
+the agent works, rather than waiting for the finished report.
 
 Needs LLM credentials for whichever LLM_PROVIDER is configured — see
 .env.example. The A2A/scheduler wiring itself needs no credentials to start;

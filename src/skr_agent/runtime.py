@@ -30,9 +30,9 @@ import logging
 import re
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Callable, Iterable, Sequence
+from typing import Any, AsyncIterator, Callable, Iterable, Sequence
 
-from langchain_core.messages import AIMessage, BaseMessage
+from langchain_core.messages import AIMessage, BaseMessage, ToolMessage
 from langchain_core.tools import BaseTool
 
 from .config import get_llm
@@ -252,6 +252,30 @@ class DeepAgent:
             subagents=subagents,
         )
 
+    def _response(
+        self, messages: Sequence[BaseMessage], ctx: ToolContext, request: AgentRequest
+    ) -> AgentResponse:
+        text = ""
+        for message in reversed(messages):
+            if isinstance(message, AIMessage) and not message.tool_calls:
+                text = _message_text(message).strip()
+                break
+        return AgentResponse(
+            status="ok",
+            output=text,
+            data=_extract_json(text) if self.structured_output else {},
+            citations=tuple(ctx.citations),
+            usage=_usage_from_messages(messages),
+            trace_id=request.trace_id,
+        )
+
+    def _recursion_limit(self, request: AgentRequest) -> int:
+        # LangGraph counts every node step, not every model turn. A deep-agent
+        # turn is roughly model -> tools -> model, so the ceiling has to be a
+        # multiple of max_turns or a run well inside its turn budget dies early
+        # with GraphRecursionError.
+        return min(self.max_turns, request.budget.max_turns) * 3
+
     async def run(self, request: AgentRequest) -> AgentResponse:
         if request.budget.expired():
             return AgentResponse.fail(
@@ -265,38 +289,85 @@ class DeepAgent:
         except Denied as exc:
             return AgentResponse.refuse(exc.reason, trace_id=request.trace_id)
 
-        max_turns = min(self.max_turns, request.budget.max_turns)
         try:
             result = await graph.ainvoke(
                 {"messages": [{"role": "user", "content": self._prompt(request)}]},
-                # LangGraph counts every node step, not every model turn. A
-                # deep-agent turn is roughly model -> tools -> model, so the
-                # ceiling has to be a multiple of max_turns or a run that is
-                # well inside its turn budget dies early with GraphRecursionError.
-                config={"recursion_limit": max_turns * 3},
+                config={"recursion_limit": self._recursion_limit(request)},
             )
         except Exception as exc:
             log.exception("runtime.failed agent=%s trace=%s", self.name, request.trace_id)
             return AgentResponse.fail("agent_error", str(exc), trace_id=request.trace_id)
 
-        messages: list[BaseMessage] = result.get("messages", [])
-        usage = _usage_from_messages(messages)
-        text = ""
-        for message in reversed(messages):
-            if isinstance(message, AIMessage) and not message.tool_calls:
-                text = _message_text(message).strip()
-                break
+        return self._response(result.get("messages", []), ctx, request)
 
-        data = _extract_json(text) if self.structured_output else {}
+    async def stream(
+        self, request: AgentRequest
+    ) -> AsyncIterator[tuple[str, str] | AgentResponse]:
+        """Run, yielding progress as it happens, then the final response.
 
-        return AgentResponse(
-            status="ok",
-            output=text,
-            data=data,
-            citations=tuple(ctx.citations),
-            usage=usage,
-            trace_id=request.trace_id,
-        )
+        Yields ``("progress", text)`` tuples while the agent works and finishes
+        with exactly one ``AgentResponse`` — so a caller can relay progress to
+        a user without having to reconstruct the final answer itself. A
+        multi-minute BOM sweep is unusable over a request/response API that
+        says nothing until it is done; this is what the A2A layer streams.
+
+        ``run()`` is not implemented in terms of this on purpose: the
+        scheduler and in-process callers have nowhere to put progress events,
+        and paying for the extra bookkeeping to discard it would be silly.
+        """
+        if request.budget.expired():
+            yield AgentResponse.fail(
+                "budget_exhausted", "deadline passed before work started",
+                trace_id=request.trace_id,
+            )
+            return
+
+        ctx = ToolContext(principal=request.principal, request=request)
+        try:
+            graph = self._build_graph(ctx)
+        except Denied as exc:
+            yield AgentResponse.refuse(exc.reason, trace_id=request.trace_id)
+            return
+
+        messages: list[BaseMessage] = []
+        try:
+            async for chunk in graph.astream(
+                {"messages": [{"role": "user", "content": self._prompt(request)}]},
+                config={"recursion_limit": self._recursion_limit(request)},
+                stream_mode="updates",
+            ):
+                for update in chunk.values():
+                    if not isinstance(update, dict):
+                        continue
+                    for message in update.get("messages", []) or []:
+                        messages.append(message)
+                        note = _progress_note(message)
+                        if note:
+                            yield ("progress", note)
+        except Exception as exc:
+            log.exception("runtime.failed agent=%s trace=%s", self.name, request.trace_id)
+            yield AgentResponse.fail("agent_error", str(exc), trace_id=request.trace_id)
+            return
+
+        yield self._response(messages, ctx, request)
+
+
+def _progress_note(message: BaseMessage) -> str:
+    """A one-line, user-facing description of one step the agent just took.
+
+    Deliberately says which tool ran rather than echoing its output: tool
+    results routinely contain content the caller is not cleared to see, and a
+    progress feed is not the place to leak it past the authorization the tool
+    layer just applied.
+    """
+    if isinstance(message, AIMessage):
+        names = [c["name"] for c in (message.tool_calls or [])]
+        if names:
+            return "Working: " + ", ".join(names)
+        return ""
+    if isinstance(message, ToolMessage):
+        return f"Finished: {message.name}"
+    return ""
 
 
 def _usage_from_messages(messages: Sequence[BaseMessage]) -> Usage:

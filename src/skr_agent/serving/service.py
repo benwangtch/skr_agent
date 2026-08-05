@@ -64,8 +64,10 @@ async def run(
     mesh = build_mesh(fixtures=fixtures, project_root=project_root)
 
     base_url = f"http://{host}:{port}/"
-    app = build_a2a_app(mesh.report_agent, base_url=base_url, registry=mesh.registry)
-    server = uvicorn.Server(uvicorn.Config(app, host=host, port=port, log_level="info"))
+    a2a_app = build_a2a_app(mesh.report_agent, url=base_url, registry=mesh.registry)
+    server = uvicorn.Server(
+        uvicorn.Config(a2a_app.build(), host=host, port=port, log_level="info")
+    )
 
     scheduler = Scheduler(default_jobs(mesh, cron=cron))
 
