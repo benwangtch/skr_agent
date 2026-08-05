@@ -3,7 +3,7 @@
 狀態：實作完成
 範圍：`protocol.py`、`mesh.py`、`runtime.py`、`report/`、`serving/`
 
-**這份文件只講 skr agent（`report/agent.py`）本身的框架**：它跑在什麼執行框架上、怎麼被 serve 成 A2A server、排程怎麼跑、外部怎麼跟它溝通。copilot（FE 對話用的路由 agent）不在討論範圍——那是消費 skr agent 的角色，不是 skr agent 框架的一部分。
+**這份文件講 skr agent（`report/agent.py`）本身的框架**：它跑在什麼執行框架上、怎麼被 serve 成 A2A server、排程怎麼跑、外部怎麼跟它溝通。它的資料來源和授權模型在 [`00-architecture.md`](00-architecture.md)，設定層在 [`01-config.md`](01-config.md)。
 
 skr agent 是一個 deep research agent：它接開放式問題，自己決定要挖多深，跨多個資料來源交叉比對，最後產出有出處的報告。**BOM、外部新聞、內部 wiki 是它的三個資料來源，地位相同**——wiki 只是其中一個（它另外有授權模型，所以程式碼上獨立成一個模組，但那是權限的關係，不是它比較重要）。
 
@@ -258,7 +258,7 @@ await asyncio.gather(
 
 ## 7. 換框架時實際驗證過什麼
 
-測試套件（135 個，全部不需要金鑰）測的是接縫，不是模型。所以換框架後另外用一個**本地假 OpenAI-compatible server**（回一次 tool call、再回一次最終答案）把整條鏈路跑過一遍，確認：
+測試套件（133 個，全部不需要金鑰）測的是接縫，不是模型。所以換框架後另外用一個**本地假 OpenAI-compatible server**（回一次 tool call、再回一次最終答案）把整條鏈路跑過一遍，確認：
 
 - tool call 真的被 dispatch、tool 真的執行、最終答案真的被抽出來（`AIMessage` 內容可能是字串也可能是 typed block 陣列，兩種都要處理，見 `runtime.py::_message_text`）
 - citation 跨 tool 累積並出現在 `AgentResponse.citations`

@@ -2,9 +2,8 @@
 
 These call the wiki tool functions directly and run without API credentials —
 they test the seam, not the model. Tools are built through
-``make_wiki_toolset``, the same factory every agent (copilot, the report
-agent, the optional wiki_ask) goes through, so a rule verified here holds
-everywhere.
+``make_wiki_toolset``, the same factory every caller (skr agent, the optional
+wiki_ask) goes through, so a rule verified here holds everywhere.
 """
 
 from __future__ import annotations

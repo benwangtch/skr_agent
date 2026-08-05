@@ -42,7 +42,7 @@ class TestPrincipalBinding:
             return AgentResponse(status="ok", output="done")
 
         spec = AgentSpec(name="probe", description="d", handler=handler)
-        t = agent_as_tool(spec, principal=ALICE, parent="copilot")
+        t = agent_as_tool(spec, principal=ALICE, parent="caller")
 
         # A model attempting to assert a different identity in the tool call.
         await call(t, {"task": "go", "principal": "mallory", "division": "finance"})
@@ -61,7 +61,7 @@ class TestPrincipalBinding:
         t = agent_as_tool(
             AgentSpec(name="probe", description="d", handler=handler),
             principal=ALICE,
-            parent="copilot",
+            parent="caller",
         )
         await call(t, {"task": "go", "namespace": "finance"})
         assert seen[0].inputs == {"namespace": "finance"}
@@ -93,7 +93,7 @@ class TestRendering:
                 Citation(kind="raw_report", ref="rpt-1", title="W28 weekly"),
             ),
         )
-        t = agent_as_tool(spec_returning(response), principal=ALICE, parent="copilot")
+        t = agent_as_tool(spec_returning(response), principal=ALICE, parent="caller")
         text = await call(t, {"task": "who supplies ASC-4400?"})
         assert "Acme is sole source." in text
         assert "supply/acme" in text
@@ -102,13 +102,13 @@ class TestRendering:
 
     async def test_structured_data_is_rendered_as_json(self):
         response = AgentResponse(status="ok", output="ok", data={"ref": "supply/x"})
-        t = agent_as_tool(spec_returning(response), principal=ALICE, parent="copilot")
+        t = agent_as_tool(spec_returning(response), principal=ALICE, parent="caller")
         text = await call(t, {"task": "t"})
         assert '"ref": "supply/x"' in text
 
     async def test_refusal_is_an_error_result_with_the_reason_intact(self):
         response = AgentResponse.refuse("alice may not read namespace 'finance'")
-        t = agent_as_tool(spec_returning(response), principal=ALICE, parent="copilot")
+        t = agent_as_tool(spec_returning(response), principal=ALICE, parent="caller")
         text = await call(t, {"task": "t"})
         assert text.startswith("[refused]")
         assert "may not read namespace" in text
@@ -120,7 +120,7 @@ class TestRendering:
         t = agent_as_tool(
             AgentSpec(name="probe", description="d", handler=handler),
             principal=ALICE,
-            parent="copilot",
+            parent="caller",
         )
         text = await call(t, {"task": "t"})
         assert text.startswith("[refused]")
@@ -133,7 +133,7 @@ class TestRendering:
         t = agent_as_tool(
             AgentSpec(name="probe", description="d", handler=handler),
             principal=ALICE,
-            parent="copilot",
+            parent="caller",
         )
         text = await call(t, {"task": "t"})
         assert text.startswith("[failed]")
@@ -176,7 +176,7 @@ class TestRegistry:
                 spec_returning(AgentResponse(status="ok"), name="skr_agent"),
             ],
             principal=ALICE,
-            parent="copilot",
+            parent="caller",
         )
         assert [t.name for t in tools] == ["wiki_ask", "skr_agent"]
 

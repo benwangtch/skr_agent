@@ -3,7 +3,7 @@
 
     uv run python examples/run_report.py                  # user-triggered sweep, own division
     uv run python examples/run_report.py --scheduled       # service-account sweep, exec roll-up
-    uv run python examples/run_report.py --ask "..."       # ad-hoc question via copilot
+    uv run python examples/run_report.py --ask "..."       # ad-hoc question, no sweep
     uv run python examples/run_report.py --dry-run         # research only, no publish
     uv run python examples/run_report.py --reader-only     # exercise the refusal path
 
@@ -17,7 +17,7 @@ import asyncio
 import logging
 from pathlib import Path
 
-from skr_agent import Budget, build_copilot, build_mesh
+from skr_agent import Budget, build_mesh
 from skr_agent.principals import service_principal, user_principal
 from skr_agent.protocol import AgentRequest
 
@@ -26,7 +26,7 @@ ROOT = Path(__file__).resolve().parent.parent
 
 async def main() -> None:
     parser = argparse.ArgumentParser()
-    parser.add_argument("--ask", help="Route a question through copilot instead.")
+    parser.add_argument("--ask", help="Ask one ad-hoc question instead of running a sweep.")
     parser.add_argument(
         "--scheduled",
         action="store_true",
@@ -54,11 +54,11 @@ async def main() -> None:
             f"demo.user@{args.division}", args.division, roles=roles, token="demo-token"
         )
 
+    agent = mesh.report_agent
+
     if args.ask:
-        agent = build_copilot(mesh.registry, wiki_backend=mesh.backend, wiki_authz=mesh.authz)
         request = AgentRequest(principal=principal, task=args.ask, budget=Budget(max_turns=20))
     else:
-        agent = mesh.report_agent
         scope = "the full bill of materials" if args.scheduled else f"the {args.tier} tier"
         request = AgentRequest(
             principal=principal,

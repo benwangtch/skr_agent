@@ -13,7 +13,7 @@ Three rules the feature actually needs:
    bearing, and it is the one most likely to be missed, because every
    individual read and the write all pass on their own.
 
-Nobody outside this module should know any of it — in particular the copilot
+Nobody outside this module should know any of it — in particular the agent
 should not, or every new division becomes a change in two services.
 """
 

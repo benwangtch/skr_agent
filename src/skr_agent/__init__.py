@@ -1,7 +1,6 @@
-"""skr-agent: a deep research agent on LangChain's deepagents, plus its mesh."""
+"""skr-agent: a deep research agent on LangChain deepagents."""
 
 from .assembly import Mesh, build_mesh
-from .copilot import build_copilot
 from .mesh import AgentRegistry, agent_as_tool, agents_as_tools
 from .principals import service_principal, user_principal
 from .protocol import (
@@ -20,7 +19,6 @@ from .runtime import DeepAgent, ToolContext
 __all__ = [
     "Mesh",
     "build_mesh",
-    "build_copilot",
     "AgentRegistry",
     "agent_as_tool",
     "agents_as_tools",

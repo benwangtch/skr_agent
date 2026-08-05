@@ -1,8 +1,10 @@
 """The wire contract every agent in the mesh speaks.
 
 This module deliberately knows nothing about wiki, reports, or Claude. It is the
-one piece that copilot, the wiki coordinator, the report agent, and (later) the
-skills-sharing platform all depend on, so it must stay free of feature concepts.
+one piece skr agent, its data sources, its serving layer, and (later) the
+skills-sharing platform all depend on, so it must stay free of feature
+concepts — and it is what let the agent framework underneath be swapped
+without any of them changing.
 
 Two ideas carry most of the weight:
 
@@ -74,7 +76,7 @@ class Principal:
     token: str | None = None
     """The verifiable credential this Principal was decoded from. ``None``
     means "trusted in-process construction" — acceptable for tests and for the
-    copilot's own boot path, never for a request that crossed a network."""
+    an in-process boot path, never for a request that crossed a network."""
 
     def has_role(self, role: str) -> bool:
         return role in self.roles

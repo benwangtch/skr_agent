@@ -10,7 +10,7 @@ from pathlib import Path
 
 import pytest
 
-from skr_agent import build_copilot, build_mesh
+from skr_agent import build_mesh
 from skr_agent.principals import service_principal, user_principal
 from skr_agent.protocol import AgentRequest, Budget
 from skr_agent.runtime import ToolContext, _extract_json, load_skill
@@ -113,27 +113,44 @@ class TestBudgetPropagation:
         assert parent.child(max_turns=50).max_turns == 10
 
 
-class TestCopilotWiring:
-    def test_copilot_mounts_wiki_tools_directly_plus_registered_agents(self, mesh):
-        copilot = build_copilot(mesh.registry, wiki_backend=mesh.backend, wiki_authz=mesh.authz)
-        names, _, _ = surface(copilot)
-        assert {"wiki_search", "wiki_read_page", "skr_agent"} <= names
+class TestEmbeddingSkrAgentInAnotherAgent:
+    """skr agent's in-process integration surface: `agent_as_tool` wraps it so
+    a caller's model can invoke it. No agent in this repo does that any more —
+    this is the seam a consumer outside it uses, so it stays covered."""
 
-    def test_copilot_wiki_write_is_off_by_default(self, mesh):
-        copilot = build_copilot(mesh.registry, wiki_backend=mesh.backend, wiki_authz=mesh.authz)
-        names, _, _ = surface(copilot)
-        assert "wiki_write_page" not in names
+    def test_skr_agent_can_be_mounted_as_a_tool_on_another_agent(self, mesh):
+        from skr_agent.mesh import agents_as_tools
+        from skr_agent.runtime import DeepAgent
 
-    def test_copilot_wiki_write_can_be_turned_on(self, mesh):
-        copilot = build_copilot(
-            mesh.registry, wiki_backend=mesh.backend, wiki_authz=mesh.authz, wiki_writable=True
+        def feature_tools(ctx):
+            return agents_as_tools(
+                mesh.registry.list(), principal=ctx.principal, parent="caller"
+            )
+
+        caller = DeepAgent(
+            name="caller",
+            description="an agent that delegates to skr agent",
+            system_prompt="delegate",
+            toolsets=[feature_tools],
         )
-        names, _, _ = surface(copilot)
-        assert "wiki_write_page" in names
+        names, _, _ = surface(caller)
+        assert names == {"skr_agent"}
 
-    def test_copilot_loads_no_skills_from_disk(self, mesh):
-        copilot = build_copilot(mesh.registry, wiki_backend=mesh.backend, wiki_authz=mesh.authz)
-        assert copilot.skills == []
+    def test_a_read_only_wiki_toolset_omits_the_write_tool(self, mesh):
+        """`writable=False` removes the capability rather than refusing it —
+        what a read-only consumer mounts."""
+        from skr_agent.runtime import DeepAgent
+        from skr_agent.wiki.tools import make_wiki_toolset
+
+        reader = DeepAgent(
+            name="reader",
+            description="read-only wiki consumer",
+            system_prompt="read",
+            toolsets=[make_wiki_toolset(mesh.backend, mesh.authz, writable=False)],
+        )
+        names, _, _ = surface(reader)
+        assert {"wiki_search", "wiki_read_page"} <= names
+        assert "wiki_write_page" not in names
 
 
 class TestPrincipalConstructors:

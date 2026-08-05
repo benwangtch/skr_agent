@@ -10,25 +10,14 @@ Its data sources are peers: the **bill of materials**, **external news**, and
 the **internal wiki**. The wiki gets its own module only because it is the one
 source with an authorization model to enforce.
 
-`copilot.py` is a thin routing agent kept as a worked example of calling skr
-agent as a tool from another agent — not the focus of this repo.
+Design docs, in reading order:
 
-Start with
-[`docs/design/03-agent-architecture-and-serving.md`](docs/design/03-agent-architecture-and-serving.md)
-— it is the current architecture doc: why `deepagents`, why the report rubric
-is inlined rather than progressively disclosed, why `a2a-sdk` is pinned to
-0.3.x, the two ways callers reach the agent (in-process `agent_as_tool` vs.
-cross-process A2A), and how the scheduler and the A2A server share one
-process.
-[`docs/design/00-architecture.md`](docs/design/00-architecture.md) covers why
-the wiki is a toolset rather than an agent, and how scheduled vs.
-user-triggered reports get different clearance through different principals.
-[`docs/design/01-config-and-serving.md`](docs/design/01-config-and-serving.md)
-and
-[`docs/design/02-package-management.md`](docs/design/02-package-management.md)
-cover the config layer and why uv over pip. **Note:** 00 and 01 predate the
-move to `deepagents` and still describe the Claude Agent SDK in places; 03 is
-authoritative where they disagree.
+| | |
+|---|---|
+| [`03-agent-architecture-and-serving.md`](docs/design/03-agent-architecture-and-serving.md) | **Start here.** The framework: why `deepagents`, why the report rubric is inlined rather than progressively disclosed, why `a2a-sdk` is pinned to 0.3.x, the two ways callers reach the agent, and how the scheduler and A2A server share one process. |
+| [`00-architecture.md`](docs/design/00-architecture.md) | The input side: the three data sources, why the wiki is a toolset rather than an agent, and how scheduled vs. user-triggered runs get different clearance through different principals. |
+| [`01-config.md`](docs/design/01-config.md) | The env-driven config layer and how to point it at an internal LLM gateway. |
+| [`02-package-management.md`](docs/design/02-package-management.md) | Why uv over pip, and where dev dependencies live. |
 [`docs/RUNBOOK.md`](docs/RUNBOOK.md) is the operational doc — every command to
 run this locally and a step-by-step manual end-to-end verification pass (the
 kind that actually calls the model, unlike the test suite below).
@@ -42,7 +31,6 @@ src/skr_agent/
   runtime.py       DeepAgent — thin shell over deepagents/LangGraph, config-driven
   principals.py    service_principal() vs user_principal() — who triggers a run
   assembly.py      wiring; the only module that knows about all the others
-  copilot.py       copilot's tool surface — wiki tools mounted directly
   config/
     base.py          BaseConfig — every IO-service config inherits this
     llm.py           ★ which chat model the agent runs on (any LangChain provider)
@@ -100,7 +88,7 @@ uv run python examples/run_report.py                        # user-triggered, ow
 uv run python examples/run_report.py --scheduled            # service account: cross-division, exec roll-up
 uv run python examples/run_report.py --dry-run              # research only
 uv run python examples/run_report.py --reader-only          # exercise the refusal path
-uv run python examples/run_report.py --ask "What is our exposure on the ASC-4400?"
+uv run python examples/run_report.py --ask "What is our exposure on the ASC-4400?"   # one question, no sweep
 
 uv run python examples/run_service.py                       # A2A server + scheduler, same process
 curl http://localhost:8000/.well-known/agent-card.json | jq
@@ -115,7 +103,7 @@ curl http://localhost:8000/ -H 'Content-Type: application/json' \
 Scheduled and on-demand runs are the same agent with a different `Principal`
 (`skr_agent.principals`) — that difference is what makes a scheduled sweep see
 the executive roll-up while a user only ever sees their own division. See
-design doc §5.
+[`00-architecture.md`](docs/design/00-architecture.md) §4.
 
 Each of the above needs real `LLM_API_KEY` credentials and calls the model —
 see [`docs/RUNBOOK.md`](docs/RUNBOOK.md) §3 for what to expect from each one
@@ -126,7 +114,7 @@ scheduler survive running together).
 ## Test
 
 ```bash
-uv run pytest              # 135 tests, no credentials required
+uv run pytest              # 133 tests, no credentials required
 ```
 
 Coverage: namespace authorization, clearance-gated namespaces, the
@@ -145,12 +133,12 @@ scheduler firing. See design doc §7.
 
 ## Extending
 
-Adding a feature? Three questions, in order (`00-architecture.md` §12):
+Adding a feature? Three questions, in order (`00-architecture.md` §9):
 
 1. Does it need authorization? → write the rule in an `authz.py`, expose it as
    a tool. Don't default to wrapping an agent around it.
-2. Is the step count known in advance? → plain API call if yes, `DeepAgent` if
-   no.
+2. Is the step count known in advance? → call a chat model directly if yes,
+   `DeepAgent` if no.
 3. Will it be called by more than one kind of principal (user / scheduled /
    third party)? → decide their grants explicitly now, the way
    `principals.py` does — don't assume the same input implies the same output.

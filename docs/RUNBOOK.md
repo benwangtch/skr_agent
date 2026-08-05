@@ -1,6 +1,6 @@
 # Runbook — 怎麼跑起來、怎麼驗證
 
-這份文件回答兩個問題：「怎麼執行這支程式」和「怎麼確認它真的動」。架構決策不在這裡——那些在 `docs/design/03-agent-architecture-and-serving.md`（現行架構：deepagents、A2A、排程）。這裡只講操作。
+這份文件回答兩個問題：「怎麼執行這支程式」和「怎麼確認它真的動」。架構決策不在這裡——那些在 `docs/design/03-agent-architecture-and-serving.md`（框架、A2A、排程）和 `00-architecture.md`（資料來源與授權）。這裡只講操作。
 
 目前的測試套件（`uv run pytest`）**完全不需要 API 金鑰**，因為它測的是接縫（授權規則、principal 解析、排程時序、A2A 訊息轉換），不是叫真的模型。所以「真的跑起來看它動」跟「跑測試」是兩件不同的事，這份文件把兩者都寫清楚，中間那段 §3 是實際會呼叫 LLM、花錢、需要金鑰的部分。
 
@@ -13,16 +13,15 @@ src/skr_agent/
   protocol.py, mesh.py, runtime.py     契約層 + agent-as-tool + deepagents 執行殼
   principals.py                        service_principal() vs user_principal()
   assembly.py                          build_mesh() —— 組裝整個系統的唯一入口
-  copilot.py                           路由層（非重點，見 README）
   config/                              env-driven 設定（llm.py 有真的接上；db.py / minio.py 是佔位）
   wiki/                                三個資料來源之一，唯一有授權模型的那個
   report/                              skr agent 本體 + BOM/news 資料來源
   serving/                             A2A server（streaming）+ cron-like scheduler
 fixtures/                              4 家公司、5 頁 wiki（namespace: supply / platform / shared）、4 份原始週報
 examples/
-  run_report.py                        單次執行 skr agent 或 copilot
+  run_report.py                        單次執行 skr agent（掃描或單一提問）
   run_service.py                       同時跑 A2A server + 排程
-tests/                                 135 個測試，6 個檔案，全部不需要金鑰
+tests/                                 133 個測試，6 個檔案，全部不需要金鑰
 ```
 
 ---
@@ -56,7 +55,7 @@ uv run python -c "from skr_agent.config import get_llm; l=get_llm(); print(l.pro
 ## 2. 跑單元測試（不花錢、不用金鑰）
 
 ```bash
-uv run pytest              # 135 個測試，約 3 秒
+uv run pytest              # 133 個測試，約 3 秒
 uv run pytest -q tests/test_wiki_authz.py     # 只跑某個檔案
 uv run pytest -k aggregation                  # 只跑名字符合的測試
 ```
@@ -125,19 +124,25 @@ uv run python examples/run_report.py --scheduled -v 2>&1 | grep -E "wiki.write|w
 
 預期：`service_principal()` 掃全部 BOM（不只 critical tier），如果報告內容橫跨多個 division，應該寫進 `exec` namespace，不是 `shared` 或任何單一 division——這是 `WikiAuthorizer.check_aggregation` 在擋的東西（design doc §5）。如果看到它寫進了 `shared`，那是真的 bug，不是預期行為。
 
-### 3.5 走 copilot 路由
+### 3.5 單一提問：驗證 agent 自己會挑對工具
 
 ```bash
 uv run python examples/run_report.py --ask "What is our exposure on the ASC-4400 controller?"
 ```
 
-預期：copilot 會判斷這個問題該用 `wiki_search`（內部已知資訊，fixtures 裡 `supply/acme-semiconductor` 頁面本來就提到 ASC-4400 是單一供應商），**不需要**觸發整個 report agent 的外部新聞掃描——如果它每次都觸發完整 report agent，代表 copilot 的路由 prompt 需要調整。
+預期：agent 判斷這題用 `wiki_search` / `wiki_read_page` 就夠（fixtures 裡 `supply/acme-semiconductor` 本來就提到 ASC-4400 是單一供應商），**不需要**把整份 BOM 掃一遍、也不需要外部新聞搜尋。用 `-v` 看它實際呼叫了哪些 tool：
 
 ```bash
-uv run python examples/run_report.py --ask "Run a full incident sweep and tell me what happened with our suppliers this week"
+uv run python examples/run_report.py --ask "..." -v 2>&1 | grep -i "tool"
 ```
 
-這句話應該會讓 copilot 呼叫 `skr_agent`（因為問題需要外部研究），可以對照看兩種問法觸發的路徑是否符合預期。
+如果它對這種純內部查詢也去跑完整 sweep，代表 `report/agent.py` 的 system prompt 需要調整——這是驗證「deep research agent 會不會把力氣花在不需要的地方」的地方。對照組：
+
+```bash
+uv run python examples/run_report.py --ask "What happened with our suppliers this week?"
+```
+
+這句需要外部研究，應該會看到 `search_news` / `fetch_article` 出現。
 
 ### 3.6 A2A server + 排程：兩個一起跑
 
@@ -198,10 +203,10 @@ scheduler.fire job=weekly-bom-sweep agent=skr_agent trace=...
 - 使用者觸發的報告寫進正確的 namespace（3.2）
 - 沒有寫入權限時系統會擋下來、且 agent 照規矩回報而不是硬幹（3.3）
 - 排程帳號的跨部門彙整寫進 clearance 夠的 namespace，不會外洩（3.4）
-- Copilot 的路由邏輯會依問題類型選對 tool（3.5）
+- Agent 會依問題類型選對 tool，不會對純內部查詢做整份掃描（3.5）
 - A2A server 跟排程可以在同一個 process 穩定跑，外部呼叫走得通（3.6）
 
-這六步涵蓋了 `docs/design/03-agent-architecture-and-serving.md` §8 列出的「已知限制」之外的核心行為。**沒有自動化的 e2e 測試**（§2 的 135 個測試都用 stub，不叫真的模型）——這是刻意的，因為每次 CI 跑都花 token、還會因為模型輸出的隨機性讓測試不穩定。真要把 §3 這幾步自動化，做法是寫一支跑在 CI 之外（例如手動觸發或排程跑一次）的 smoke test script，判準改成寬鬆的（例如「有沒有 citations」而不是「內容逐字符合」）——這份文件目前先提供人工跑過一遍的步驟，還沒做那支腳本。
+這六步涵蓋了 `docs/design/03-agent-architecture-and-serving.md` §8 列出的「已知限制」之外的核心行為。**沒有自動化的 e2e 測試**（§2 的 133 個測試都用 stub，不叫真的模型）——這是刻意的，因為每次 CI 跑都花 token、還會因為模型輸出的隨機性讓測試不穩定。真要把 §3 這幾步自動化，做法是寫一支跑在 CI 之外（例如手動觸發或排程跑一次）的 smoke test script，判準改成寬鬆的（例如「有沒有 citations」而不是「內容逐字符合」）——這份文件目前先提供人工跑過一遍的步驟，還沒做那支腳本。
 
 ## 5. 常見卡住的地方
 
