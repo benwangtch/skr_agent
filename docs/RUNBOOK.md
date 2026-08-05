@@ -1,6 +1,6 @@
 # Runbook — 怎麼跑起來、怎麼驗證
 
-這份文件回答兩個問題：「怎麼執行這支程式」和「怎麼確認它真的動」。架構決策不在這裡——那些在 `docs/design/00-architecture.md`（copilot / wiki / report agent 的關係）和 `docs/design/01-config-and-serving.md`（config、A2A、排程）。這裡只講操作。
+這份文件回答兩個問題：「怎麼執行這支程式」和「怎麼確認它真的動」。架構決策不在這裡——那些在 `docs/design/03-agent-architecture-and-serving.md`（現行架構：deepagents、A2A、排程）。這裡只講操作。
 
 目前的測試套件（`uv run pytest`）**完全不需要 API 金鑰**，因為它測的是接縫（授權規則、principal 解析、排程時序、A2A 訊息轉換），不是叫真的模型。所以「真的跑起來看它動」跟「跑測試」是兩件不同的事，這份文件把兩者都寫清楚，中間那段 §3 是實際會呼叫 LLM、花錢、需要金鑰的部分。
 
@@ -10,19 +10,19 @@
 
 ```
 src/skr_agent/
-  protocol.py, mesh.py, runtime.py     契約層 + agent-as-tool + Claude Agent SDK 執行殼
+  protocol.py, mesh.py, runtime.py     契約層 + agent-as-tool + deepagents 執行殼
   principals.py                        service_principal() vs user_principal()
   assembly.py                          build_mesh() —— 組裝整個系統的唯一入口
-  copilot.py                           使用者對話的路由層
+  copilot.py                           路由層（非重點，見 README）
   config/                              env-driven 設定（llm.py 有真的接上；db.py / minio.py 是佔位）
-  wiki/                                wiki 授權 tools（不是 agent，見 design doc §2）
-  report/                              deep research agent（BOM 掃描、news 搜尋、wiki 交叉比對）
-  serving/                             A2A server + cron-like scheduler
+  wiki/                                三個資料來源之一，唯一有授權模型的那個
+  report/                              skr agent 本體 + BOM/news 資料來源
+  serving/                             A2A server（streaming）+ cron-like scheduler
 fixtures/                              4 家公司、5 頁 wiki（namespace: supply / platform / shared）、4 份原始週報
 examples/
-  run_report.py                        單次執行 report agent 或 copilot
+  run_report.py                        單次執行 skr agent 或 copilot
   run_service.py                       同時跑 A2A server + 排程
-tests/                                 129 個測試，6 個檔案，全部不需要金鑰
+tests/                                 135 個測試，6 個檔案，全部不需要金鑰
 ```
 
 ---
@@ -45,18 +45,18 @@ LLM_API_KEY=sk-or-v1-你的OpenRouter金鑰    # 去 https://openrouter.ai/keys 
 驗證設定有生效，不用花錢：
 
 ```bash
-uv run python -c "from skr_agent.config import get_llm; print(get_llm().to_cli_env())"
-# 應該看到 ANTHROPIC_BASE_URL / ANTHROPIC_AUTH_TOKEN 指向 openrouter.ai/api
+uv run python -c "from skr_agent.config import get_llm; l=get_llm(); print(l.provider, l.resolved_base_url(), l.resolved_model())"
+# 應該看到 openrouter https://openrouter.ai/api/v1 qwen/qwen3.5-plus-02-15
 ```
 
-換成別的 provider（真的 Anthropic API、或公司內部 host）：見 `docs/design/01-config-and-serving.md` §2–3，只改 `.env`，不改程式碼。
+換成別的 provider（OpenAI / Anthropic，或公司內部 gateway）：見 `docs/design/03-agent-architecture-and-serving.md` §2.2，只改 `.env`，不改程式碼。內部 gateway 只要有 OpenAI-compatible 的 `/v1/chat/completions` 就能直接接，設 `LLM_PROVIDER=custom` + `LLM_BASE_URL` + `LLM_MODEL`。
 
 ---
 
 ## 2. 跑單元測試（不花錢、不用金鑰）
 
 ```bash
-uv run pytest              # 129 個測試，約 1 秒
+uv run pytest              # 135 個測試，約 3 秒
 uv run pytest -q tests/test_wiki_authz.py     # 只跑某個檔案
 uv run pytest -k aggregation                  # 只跑名字符合的測試
 ```
@@ -65,10 +65,10 @@ uv run pytest -k aggregation                  # 只跑名字符合的測試
 |---|---|
 | `test_wiki_authz.py`（32） | namespace 授權、clearance-gated namespace、aggregation leak 檢查 |
 | `test_mesh.py`（15） | agent-as-tool 的 principal 綁定、citation 傳遞、拒絕處理 |
-| `test_wiring.py`（22） | 每個 agent 的 tool 清單、budget 傳遞、skill 載入 |
-| `test_config.py`（21） | LLM config 的 provider 預設值、env var 覆蓋、`to_cli_env()` 輸出形狀 |
+| `test_wiring.py`（21） | 每個 agent 的 tool 清單、subagent 拿不到 write tool、報告規範真的進 prompt |
+| `test_config.py`（22） | LLM config 的 provider 預設值、env var 覆蓋、chat model 建構 |
 | `test_scheduler.py`（19） | cron 排程時序、job 失敗互不影響、hook 觸發 |
-| `test_a2a_server.py`（20） | A2A executor 的訊息轉換、principal 解析、task 生命週期 |
+| `test_a2a_server.py`（26） | A2A executor 的 principal 解析、streaming 進度、task 生命週期、file artifact |
 
 **這些測試在改動任何一行程式碼後都該先過。** 它們用 stub agent（假的、瞬間回應、不呼叫模型）驗證系統的接線邏輯——如果這裡壞了，接上真的模型也不會變好，先把這層修好再往下走。
 
@@ -89,7 +89,7 @@ uv run python examples/run_report.py --dry-run --tier critical
 - 輸出最後有 `--- citations ---` 區塊，列出至少一個 `external_url`（新聞）和一個 `wiki_page`/`raw_report`（因為 agent 應該會去 wiki 交叉比對既有記錄）
 - 因為 `--dry-run`，不會真的寫 wiki，最後不會印 `wiki namespaces now: ...`
 
-若這步失敗（例如 `LLM_PROVIDER=openrouter` 設定錯誤導致連不上），錯誤會來自 Claude Agent SDK 的 CLI 子行程，通常是認證或連線層級的訊息，不會是這支程式自己丟的例外——這代表問題在 §1 的 config，不在後面的邏輯。
+若這步失敗（例如 `LLM_API_KEY` 沒填或 gateway 連不上），錯誤會是 provider client 的連線／認證訊息。注意 key 沒填的話會在**建立 agent 的當下**就報錯，不是跑到一半才失敗——這代表問題在 §1 的 config，不在後面的邏輯。
 
 ### 3.2 使用者觸發：驗證權限範圍
 
@@ -137,7 +137,7 @@ uv run python examples/run_report.py --ask "What is our exposure on the ASC-4400
 uv run python examples/run_report.py --ask "Run a full incident sweep and tell me what happened with our suppliers this week"
 ```
 
-這句話應該會讓 copilot 呼叫 `wiki_report`（因為問題需要外部研究），可以對照看兩種問法觸發的路徑是否符合預期。
+這句話應該會讓 copilot 呼叫 `skr_agent`（因為問題需要外部研究），可以對照看兩種問法觸發的路徑是否符合預期。
 
 ### 3.6 A2A server + 排程：兩個一起跑
 
@@ -155,23 +155,33 @@ uv run python examples/run_service.py --port 8000 --cron "*/5 * * * *" -v
 curl -s http://localhost:8000/.well-known/agent-card.json | python3 -m json.tool
 ```
 
-預期看到 `"name": "wiki_report"`、`skills` 陣列有 `wiki_report`。
+預期看到 `"name": "skr_agent"`、`skills` 陣列有 `skr_agent`、`capabilities.streaming` 是 `true`。
 
 ```bash
-curl -s http://localhost:8000/ \
-  -H 'Content-Type: application/json' -H 'A2A-Version: 1.0' \
-  -d '{"jsonrpc":"2.0","id":"1","method":"SendMessage","params":{
-        "message":{"messageId":"m1","role":"ROLE_USER",
-                   "parts":[{"text":"What incidents affected Acme Semiconductor?"}]}}}' \
+curl -s http://localhost:8000/ -H 'Content-Type: application/json' \
+  -d '{"jsonrpc":"2.0","id":"1","method":"message/send","params":{
+        "message":{"messageId":"m1","role":"user",
+                   "parts":[{"kind":"text","text":"What incidents affected Acme Semiconductor?"}]}}}' \
   | python3 -m json.tool
 ```
 
-**注意 `A2A-Version: 1.0` header 是必要的**，沒帶會被拒絕（`VERSION_NOT_SUPPORTED`）——這不是文件亂寫，是實測出來的行為，見 design doc §4。預期回應的 `result.task.status.state` 是 `TASK_STATE_COMPLETED`，`status.message.parts[0].text` 有實際內容。
+預期 `result.status.state` 是 `completed`，`result.history` 裡有實際內容。
+
+想看串流進度（長時間的 sweep 建議用這個），把 method 換成 `message/stream`，回應是 SSE：
+
+```bash
+curl -N -s http://localhost:8000/ -H 'Content-Type: application/json' \
+  -d '{"jsonrpc":"2.0","id":"1","method":"message/stream","params":{
+        "message":{"messageId":"m2","role":"user",
+                   "parts":[{"kind":"text","text":"Sweep the critical tier"}]}}}'
+```
+
+預期先看到一連串 `"state":"working"` 的事件（`Working: search_news`、`Finished: search_news` 之類），最後才是 `"state":"completed"`、`"final":true`。
 
 排程那邊：等到 cron 觸發的分鐘數（用 `*/5` 的話最多等 5 分鐘），觀察第一個 terminal 的 log，應該看到：
 
 ```
-scheduler.fire job=weekly-bom-sweep agent=wiki_report trace=...
+scheduler.fire job=weekly-bom-sweep agent=skr_agent trace=...
 ```
 
 跑完後可以再打一次 agent-card 或直接看 log 裡 `wiki.write` 那行，確認排程觸發的這次也走了同一套授權邏輯（`service_principal()`，寫進 `exec`）。
@@ -191,14 +201,15 @@ scheduler.fire job=weekly-bom-sweep agent=wiki_report trace=...
 - Copilot 的路由邏輯會依問題類型選對 tool（3.5）
 - A2A server 跟排程可以在同一個 process 穩定跑，外部呼叫走得通（3.6）
 
-這六步涵蓋了 `docs/design/00-architecture.md` 和 `01-config-and-serving.md` 裡列出的每一個「已知限制」之外的核心行為。**沒有自動化的 e2e 測試**（§2 的 129 個測試都用 stub，不叫真的模型）——這是刻意的，因為每次 CI 跑都花 token、還會因為模型輸出的隨機性讓測試不穩定。真要把 §3 這幾步自動化，做法是寫一支跑在 CI 之外（例如手動觸發或排程跑一次）的 smoke test script，判準改成寬鬆的（例如「有沒有 citations」而不是「內容逐字符合」）——這份文件目前先提供人工跑過一遍的步驟，還沒做那支腳本。
+這六步涵蓋了 `docs/design/03-agent-architecture-and-serving.md` §8 列出的「已知限制」之外的核心行為。**沒有自動化的 e2e 測試**（§2 的 135 個測試都用 stub，不叫真的模型）——這是刻意的，因為每次 CI 跑都花 token、還會因為模型輸出的隨機性讓測試不穩定。真要把 §3 這幾步自動化，做法是寫一支跑在 CI 之外（例如手動觸發或排程跑一次）的 smoke test script，判準改成寬鬆的（例如「有沒有 citations」而不是「內容逐字符合」）——這份文件目前先提供人工跑過一遍的步驟，還沒做那支腳本。
 
 ## 5. 常見卡住的地方
 
 | 現象 | 大概率原因 | 對應章節 |
 |---|---|---|
-| `run_report.py` 卡住很久或連線類錯誤 | `LLM_API_KEY` 沒填或 provider 設定錯 | §1 |
+| 一啟動就報 missing credentials | `LLM_API_KEY` 沒填——現在是建構時就擋，不是跑到一半 | §1 |
+| `run_report.py` 卡住很久或連線類錯誤 | `LLM_BASE_URL` 指向連不到的 gateway | §1 |
 | 報告寫進錯的 namespace | 檢查是不是漏帶 `--scheduled`（會用不同 principal） | §3.2 / §3.4 |
-| A2A `curl` 回 `VERSION_NOT_SUPPORTED` | 沒帶 `A2A-Version: 1.0` header | §3.6 |
+| A2A `curl` 回 method not found | a2a-sdk 0.3.x 的 method 名是 `message/send` / `message/stream`（不是 1.x 的 `SendMessage`） | §3.6 |
 | 排程一直不觸發 | cron 表達式算的下一次時間比想像中晚——`*/5 * * * *` 最多等 5 分鐘，不是啟動時立刻跑（這是真正的 cron 語意，見 design doc §5） | §3.6 |
 | 想確認 wiki 真的被寫入，但 `list_namespaces()` 看不出新舊 | 用 `-v` 開 log，找 `wiki.write` 那行 | §3.2 |

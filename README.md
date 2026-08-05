@@ -1,24 +1,34 @@
 # skr-agent
 
-An agent mesh: **copilot** (routing + directly-mounted wiki tools), the
-**wiki** (an authorized toolset, not an agent — see the design doc for why),
-and the **wiki-report agent** (the deep research agent this repo builds — also
-servable over **A2A** and runnable on a **cron-like schedule**).
+**skr agent** — a deep research agent built on LangChain's
+[`deepagents`](https://github.com/langchain-ai/deepagents). It takes open-ended
+supply-chain questions, decides for itself how deep to dig, cross-references
+several data sources, and publishes a sourced report. It is servable over
+**A2A** (with streaming) and runnable on a **cron-like schedule**.
 
-Read [`docs/design/00-architecture.md`](docs/design/00-architecture.md) first
-— it explains why the wiki is a toolset rather than a coordinator agent, how
-scheduled vs. user-triggered reports get different clearance through
-different principals, and what nanobot's Claude-Skills support actually looks
-like (checked against source, not the README).
-[`docs/design/01-config-and-serving.md`](docs/design/01-config-and-serving.md)
-covers the env-driven config layer, the A2A server, and the scheduler.
-[`docs/design/02-package-management.md`](docs/design/02-package-management.md)
-covers why uv over pip and where dev dependencies live.
+Its data sources are peers: the **bill of materials**, **external news**, and
+the **internal wiki**. The wiki gets its own module only because it is the one
+source with an authorization model to enforce.
+
+`copilot.py` is a thin routing agent kept as a worked example of calling skr
+agent as a tool from another agent — not the focus of this repo.
+
+Start with
 [`docs/design/03-agent-architecture-and-serving.md`](docs/design/03-agent-architecture-and-serving.md)
-is scoped to the wiki-report agent itself: the execution framework it runs
-on, the two ways callers reach it (in-process `agent_as_tool` vs.
-cross-process A2A), how A2A serving works end to end, and how the scheduler
-and the A2A server share one process.
+— it is the current architecture doc: why `deepagents`, why the report rubric
+is inlined rather than progressively disclosed, why `a2a-sdk` is pinned to
+0.3.x, the two ways callers reach the agent (in-process `agent_as_tool` vs.
+cross-process A2A), and how the scheduler and the A2A server share one
+process.
+[`docs/design/00-architecture.md`](docs/design/00-architecture.md) covers why
+the wiki is a toolset rather than an agent, and how scheduled vs.
+user-triggered reports get different clearance through different principals.
+[`docs/design/01-config-and-serving.md`](docs/design/01-config-and-serving.md)
+and
+[`docs/design/02-package-management.md`](docs/design/02-package-management.md)
+cover the config layer and why uv over pip. **Note:** 00 and 01 predate the
+move to `deepagents` and still describe the Claude Agent SDK in places; 03 is
+authoritative where they disagree.
 [`docs/RUNBOOK.md`](docs/RUNBOOK.md) is the operational doc — every command to
 run this locally and a step-by-step manual end-to-end verification pass (the
 kind that actually calls the model, unlike the test suite below).
@@ -27,29 +37,30 @@ kind that actually calls the model, unlike the test suite below).
 
 ```
 src/skr_agent/
-  protocol.py      the contract every agent speaks (no Claude dependency)
+  protocol.py      the contract every agent speaks (no agent-framework dependency)
   mesh.py          agent-as-tool adapter + registry
-  runtime.py       DeepAgent — thin shell over the Claude Agent SDK, config-driven
+  runtime.py       DeepAgent — thin shell over deepagents/LangGraph, config-driven
   principals.py    service_principal() vs user_principal() — who triggers a run
   assembly.py      wiring; the only module that knows about all the others
   copilot.py       copilot's tool surface — wiki tools mounted directly
   config/
     base.py          BaseConfig — every IO-service config inherits this
-    llm.py           ★ which model backend the Claude Agent SDK talks to
+    llm.py           ★ which chat model the agent runs on (any LangChain provider)
     db.py            placeholder, same pattern, nothing uses it yet
     minio.py         placeholder, same pattern, nothing uses it yet
-  wiki/
+  wiki/              one data source — the only one with an authz model
     authz.py         namespace rules, clearance-gated namespaces, aggregation check
     backend.py        storage interface + fixture implementation
-    tools.py          ★ the primary wiki integration: authorized tools
+    tools.py          ★ authorized wiki tools
     coordinator.py     optional LLM synthesis layer over the same tools (opt-in, off by default)
   report/
-    sources.py / tools.py / agent.py   BOM/news tools, the deep research agent
+    sources.py / tools.py   BOM + news data sources and their tools
+    agent.py          ★ skr agent itself: prompt, sources, subagent, rubric
   serving/
-    a2a.py            ★ serve any DeepAgent as an A2A server
-    scheduler.py       ★ cron-like recurring runs of a skill
+    a2a.py            ★ serve any DeepAgent as a streaming A2A server
+    scheduler.py       ★ cron-like recurring runs
     service.py          runs both together in one process
-.claude/skills/wiki-report/SKILL.md    report format + severity rubric
+.claude/skills/incident-report/SKILL.md   report format + severity rubric
 fixtures/          4 companies, 4 articles, 5 wiki pages, 4 raw weekly reports
 ```
 
@@ -73,11 +84,12 @@ Adding a dependency: `uv add <package>` (runtime) or `uv add --group dev
 don't hand-edit the dependency list and re-lock separately.
 
 Edit `.env` — the only line that needs a real value to run against OpenRouter
-(the default) is `LLM_API_KEY` (get one at https://openrouter.ai/keys). See
-`config/llm.py` and design doc §2–3 in `01-config-and-serving.md` for why
-OpenRouter's Anthropic-compatible endpoint (not its OpenAI-compatible one) is
-what makes "simulate an internal host" work, and for switching to
-`LLM_PROVIDER=anthropic` or a real internal host (`LLM_PROVIDER=custom`).
+(the default) is `LLM_API_KEY` (get one at https://openrouter.ai/keys).
+
+Because the agent runs on LangChain, any provider with a LangChain chat model
+works. `LLM_PROVIDER=custom` + `LLM_BASE_URL` points at any internal gateway
+exposing an OpenAI-compatible `/v1/chat/completions`, which is what vLLM,
+LiteLLM and most corporate proxies expose — no protocol translation needed.
 
 The test suite needs no credentials at all.
 
@@ -92,6 +104,12 @@ uv run python examples/run_report.py --ask "What is our exposure on the ASC-4400
 
 uv run python examples/run_service.py                       # A2A server + scheduler, same process
 curl http://localhost:8000/.well-known/agent-card.json | jq
+
+# Send it a task (use message/stream instead for incremental progress over SSE)
+curl http://localhost:8000/ -H 'Content-Type: application/json' \
+  -d '{"jsonrpc":"2.0","id":"1","method":"message/send","params":{
+        "message":{"messageId":"m1","role":"user",
+                   "parts":[{"kind":"text","text":"our ASC-4400 exposure?"}]}}}'
 ```
 
 Scheduled and on-demand runs are the same agent with a different `Principal`
@@ -108,22 +126,26 @@ scheduler survive running together).
 ## Test
 
 ```bash
-uv run pytest              # 129 tests, no credentials required
+uv run pytest              # 135 tests, no credentials required
 ```
 
 Coverage: namespace authorization, clearance-gated namespaces, the
 aggregation check that stops a cross-division sweep from landing somewhere
 too public (even when the write itself would otherwise be permitted), that a
 caller cannot widen its own scope, that publishing without provenance is
-rejected, budget propagation, each agent's tool surface, LLM config resolution
-and env-var overrides, scheduler timing and failure isolation, and the A2A
-executor's principal resolution and task lifecycle (verified against the
-installed `a2a-sdk` 1.1.x API by introspection, plus one real end-to-end HTTP
-round trip through the wired FastAPI app — see `01-config-and-serving.md` §4).
+rejected, that a subagent never receives the write tool, that the report
+rubric really reaches the system prompt, LLM config and chat-model
+resolution, scheduler timing and failure isolation, and the A2A executor's
+principal resolution, streaming progress, task lifecycle and file artifacts.
+
+The suite uses stubs and never calls a model. The framework migration was
+additionally driven end to end against a local OpenAI-compatible stub server
+— tool-call loop, citation propagation, an SSE streaming round trip, and a
+scheduler firing. See design doc §7.
 
 ## Extending
 
-Adding a feature? Three questions, in order (design doc §12):
+Adding a feature? Three questions, in order (`00-architecture.md` §12):
 
 1. Does it need authorization? → write the rule in an `authz.py`, expose it as
    a tool. Don't default to wrapping an agent around it.
