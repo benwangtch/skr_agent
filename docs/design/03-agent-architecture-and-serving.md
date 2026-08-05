@@ -17,7 +17,7 @@ skr agent 是一個 deep research agent：它接開放式問題，自己決定�
 | 模型怎麼選？ | LangChain `BaseChatModel`，由 `config/llm.py` 建 | 換成 LangChain 之後不再綁特定 wire protocol，內部 gateway 只要有 OpenAI-compatible endpoint 就能接——見 §2.2 |
 | Skill（報告規範）怎麼載入？ | **直接 inline 進 system prompt**，不用 `create_deep_agent(skills=...)` | 那個參數是 progressive disclosure（模型自己決定要不要 `read_file` 去讀），對「每次都必須遵守的規範」是錯的取捨——見 §2.3 |
 | 外部怎麼呼叫 skr agent？ | 兩種機制，依「是否跨 process」二選一 | 同 process 用 `agent_as_tool`；跨 process 用 A2A——見 §3 |
-| A2A SDK 用哪個版本？ | **`a2a-sdk` 0.3.x**（釘死，不是最新的 1.x） | 對齊團隊自己 reference server 用的世代；1.x 幾乎全部改名且不相容——見 §4 |
+| A2A SDK 用哪個版本？ | **`a2a-sdk` 1.1.2**（釘死；1.1.2 是最新的 1.x，沒有 1.2/1.3） | 這個套件 API 變動很兇，0.3.x→1.x 是大改名 + 換 protobuf 型別——見 §4.1 |
 | 排程怎麼實作？ | 自寫的 in-process `Scheduler` | 排程要跟 A2A server 共用同一份資料來源連線與 principal 邏輯，接第二個代管平台換不到什麼——見 §5 |
 | A2A server 跟排程是不是分開部署？ | 不是，同一個 process、同一個 `asyncio.gather` | 兩者都只是「誰觸發 `skr_agent.run()`」的不同入口——見 §6 |
 
@@ -142,7 +142,7 @@ skr agent 同時被 serve 成一個獨立的 A2A server（`serving/a2a.py`），
 
 ## 4. 怎麼被 A2A serve
 
-`serving/a2a.py` 把 skr agent 包成一個講 A2A（JSON-RPC + SSE）的 Starlette app：
+`serving/a2a.py` 把 skr agent 包成一個講 A2A（JSON-RPC + SSE）的 FastAPI app：
 
 ```python
 def build_a2a_app(
@@ -153,50 +153,79 @@ def build_a2a_app(
     authorizer: Authorizer | None = None,
     default_principal: Principal | None = None,
     version: str = "0.1.0",
-) -> A2AStarletteApplication: ...
+    lifespan: Any | None = None,
+) -> FastAPI: ...
 ```
 
-**這一層在換框架時完全沒動**——它吃的是 `DeepAgent`，而 `DeepAgent` 的對外介面（`run(AgentRequest) -> AgentResponse`）沒變，底下換成 LangGraph 對它不可見。
+**這一層在換 agent 框架時完全沒動**——它吃的是 `DeepAgent`，而 `DeepAgent` 的對外介面（`run(AgentRequest) -> AgentResponse`）沒變，底下換成 LangGraph 對它不可見。
 
-**版本對齊——這是刻意的 pin，不是隨手挑的**：用 `a2a-sdk` **0.3.x**，因為那是團隊自己那份 reference server 用的世代（`A2AStarletteApplication` + `DefaultRequestHandler` + `TaskState.completed`）。1.x 把這些幾乎全部改名（`LegacyRequestHandler`、routes-based 接線、protobuf 訊息型別、強制 `A2A-Version: 1.0` header），**兩者不相容**。既然這份程式碼的目的就是要搬進公司環境，跟團隊同一個世代比跟最新版同步重要。
+### 4.1 版本：`a2a-sdk` 1.1.2
 
-降版順帶消掉兩個只有 1.x 才有的問題：強制的 `A2A-Version` header，以及 metadata 的 protobuf `Struct` 轉換坑（0.3.x 的 `message.metadata` 就是一個普通的 `dict`）。
+**1.1.2 是目前 PyPI 上最新的 1.x**（1.x 線是 1.0.0 → 1.0.3 → 1.1.0 → 1.1.2；沒有 1.2 或 1.3）。釘死版本號，因為這個套件的 API 變動很兇——從 0.3.x 升上來時，下面每一項都是實際改到程式碼的破壞性變更（全部是 import 進來 introspect 出來的，不是照教學抄的）：
 
-**接線方式**：
+| 0.3.x | 1.1.x |
+|---|---|
+| `a2a.server.apps.A2AStarletteApplication` | **模組整個不存在**。改成 `create_*_routes()` + `add_a2a_routes_to_fastapi()` 自己組裝，所以 `build_a2a_app()` 現在直接回傳 `FastAPI`，沒有 `.build()` 這一步 |
+| pydantic 型別 | **protobuf 型別**。`TextPart`/`FilePart`/`FileWithBytes` 都不存在了，`Part` 變成一個扁平訊息（`text`/`raw`/`url`/`data` 的 oneof，外加 `filename`、`media_type`），檔案直接放 raw bytes，不用 base64 包一層 |
+| `TaskStatusUpdateEvent(final=True)` | **沒有 `final` 欄位**。終態由 state 決定，且 `TaskUpdater` 會擋——終態之後再送 status update 會直接 raise |
+| `TaskState.completed` | `TaskState.TASK_STATE_COMPLETED`（`Role.ROLE_AGENT` 同理） |
+| `AgentCard.url` | `AgentCard.supported_interfaces`（一個 transport 一筆） |
+| `message.metadata` 是普通 dict | 是 protobuf `Struct`，要用 `MessageToDict` 遞迴轉——見 §4.3 |
 
-- `A2AStarletteApplication(agent_card=..., http_handler=DefaultRequestHandler(agent_executor=..., task_store=InMemoryTaskStore()))`
-- `build_a2a_app()` 回傳的是 `A2AStarletteApplication` 而不是建好的 app，這樣呼叫端可以自己傳 `lifespan` 給 `.build()`——同時要跑排程的那個 process 就是這樣把兩者兜起來的
+### 4.2 `A2A-Version` header 跟 body 必須配套
 
-**一次請求的生命週期**（`DeepAgentExecutor.execute`）：
+1.x 最容易誤會的一點：**header 沒帶不是「沒有版本」，SDK 會當成 `0.3`。** 實測這支 app（`enable_v0_3_compat=True`）三種組合：
+
+| header | body | 結果 |
+|---|---|---|
+| `A2A-Version: 1.0` | 1.0（`SendMessage`、`ROLE_USER`） | 正常 |
+| 不帶 | 0.3（`message/send`、`user`） | 正常，走 v0.3 compat adapter |
+| 不帶 | 1.0 | `VERSION_NOT_SUPPORTED` |
+
+所以 header 實際上是「要走 1.0 路徑就必須帶」，但失敗訊息是**版本不符**（拿 1.0 的 body 去比對預設的 0.3），不是「缺少 header」。留著 `enable_v0_3_compat=True` 是為了讓既有的 0.3 client 不改也能繼續打（第二列）。
+
+之前這裡寫過「1.x 強制 header，沒帶就被拒」——那是錯的，實際發請求測出來才發現機制是「預設成 0.3」。
+
+### 4.3 兩個實際踩到的坑
+
+**1. Executor 必須先 enqueue 一個 `Task`，才能送任何 status event。** `DefaultRequestHandler`（其實是 `DefaultRequestHandlerV2` 的別名）會拒絕在 Task 開出來之前抵達的 `TaskStatusUpdateEvent`，訊息是 `Agent should enqueue Task before ...`。而 `TaskUpdater.submit()` 送的是一個 status update，**不是** Task 物件，所以光 `submit()` 不夠。`execute()` 現在第一件事就是 enqueue `Task(status=TASK_STATE_SUBMITTED)`，排在所有提早 return 的分支之前（那些也都是 status event）。
+
+這個 bug **整套 unit test 都沒抓到**——unit test 給 executor 一個裸的 `EventQueue`，它對事件順序沒有意見。是實際發一次 HTTP 請求才炸出來的。所以現在 `tests/test_a2a_server.py` 多了 `TestThroughTheRealHandler`，走完整的 HTTP → JSON-RPC → handler → executor 路徑；把上面那個 fix 拿掉，那組測試會紅。
+
+**2. metadata 是 protobuf `Struct`。** `dict(message.metadata)` 只轉最外層，巢狀的 `inputs` 會留成一個沒轉換的 `Struct`，接著 `isinstance(x, dict)` 判否、被安靜丟掉。要用 `MessageToDict` 遞迴轉。附帶一提：protobuf 的 JSON `Value` 沒有整數型別，所以送 `{"count": 3}` 進來會變成 `3.0`，接收端要能吃 float。
+
+### 4.4 一次請求的生命週期
 
 ```
-message/send 或 message/stream 進來
-  → 沒有輸入文字 → 直接 failed，不叫 agent
+SendMessage / SendStreamingMessage 進來
+  → enqueue Task(TASK_STATE_SUBMITTED)          ← 必須第一個，見 §4.3
+  → 沒有輸入文字 → failed，不叫 agent
   → resolve_principal(metadata, call_context)
-      Denied → final failed event，內容是拒絕原因，不是 500
+      Denied → failed，內容是拒絕原因，不是 500
+  → submit() → start_work()
   → async for event in agent.stream(request):
-        progress → TaskStatusUpdateEvent(final=False, state=working)   ← 邊跑邊送
+        progress → update_status(TASK_STATE_WORKING, ...)   ← 邊跑邊送
         AgentResponse → 收下來當最終結果
-  → 最終答案拆成 text / file artifact（見下方）並送出
-  → final event: completed（response.ok）或 failed
+  → 檔案 → artifact event；文字 → 收集起來
+  → complete(message=答案) 或 failed(message=答案)
 ```
 
-**Streaming——為什麼要做**：一次 BOM sweep 要跑幾分鐘。之前的實作是跑完才一次性回一則訊息，呼叫方在那幾分鐘裡看到的是一條沒有任何動靜的連線。現在 `DeepAgent.stream()` 用 LangGraph 的 `astream(stream_mode="updates")` 把每一步吐出來，executor 轉成非 final 的 `working` event。
+**答案放在終態事件上，這是相對 0.3.x 版本刻意改的一點。** 舊的做法是把答案當成一則 `working` 訊息送出去、終態事件不帶內容——對串流呼叫方沒差，但**非串流的 `SendMessage` 呼叫方只看得到最終的 Task**，於是拿到一個空答案。現在答案（連同 citations）掛在 `complete()`/`failed()` 的 message 上，兩種呼叫方都拿得到。
 
-**progress 內容只講「跑了哪個 tool」，不回傳 tool 的輸出**（`runtime.py::_progress_note`）——這是刻意的：tool 的回傳內容經常包含呼叫方沒有權限看的東西，progress feed 不該成為繞過 tool 層授權的側漏管道。
+**Streaming**：一次 BOM sweep 要跑幾分鐘。`DeepAgent.stream()` 用 LangGraph 的 `astream(stream_mode="updates")` 把每一步吐出來，executor 轉成 `working` status update。1.0 走 `SendStreamingMessage`，0.3 走 `message/stream`，兩條都實測過會送出 submitted → working×N → completed，中間夾 artifact event。（注意 1.x 的事件包在 `result.statusUpdate` / `result.artifactUpdate` 底下，0.3 是直接放 `result`。）
+
+**progress 內容只講「跑了哪個 tool」，不回傳 tool 的輸出**（`runtime.py::_progress_note`）——刻意的：tool 的回傳內容經常包含呼叫方沒有權限看的東西，progress feed 不該成為繞過 tool 層授權的側漏管道。
 
 `run()` 沒有改成用 `stream()` 實作：排程和 in-process 呼叫方沒有地方放 progress event，為了丟掉它而多付一份簿記沒有意義。
 
-**檔案產出——`<render-cpochat />` 慣例**：平台用這個 tag 在對話裡呈現檔案。agent 在答案裡寫 `<render-cpochat src="..." name="..." desc="..." />`，executor 會把最終答案照 tag 切開，tag 變成 A2A file artifact（base64 + mime type），其餘文字照原本順序保留——所以報告裡「先放圖再解釋」的順序不會被打亂。檔案不存在時只記一行 warning 跳過，不會讓整個 task 失敗。
+**檔案產出——`<render-cpochat />` 慣例**：agent 在答案裡寫 `<render-cpochat src="..." name="..." desc="..." />`，executor 把答案照 tag 切開，tag 變成 A2A file artifact（1.x 直接放 raw bytes + `media_type`），其餘文字進終態訊息。檔案不存在時只記一行 warning 跳過，不讓整個 task 失敗。artifact 是自己組 `TaskArtifactUpdateEvent` 送的，沒用 `TaskUpdater.add_artifact()`，因為那個 helper 沒有 `description` 參數，改用它會讓呼叫方看到的 artifact 少一個欄位。
 
 `context.task_id` 直接拿來當 `AgentRequest.trace_id`——A2A 的 task 追蹤跟內部 trace 是同一個 id，方便事後對日誌。
 
-**身份怎麼決定**（`_default_principal_resolver`）：
+### 4.5 身份怎麼決定
 
 - 沒配 `authorizer`：每個呼叫方都用 `default_principal`（`subject="a2a:anonymous"`、`division="shared"`、只有 `wiki.reader`）——安全的預設值，但代表**目前這個 server 沒有真的驗證外部呼叫方是誰**。刻意留白，部署前要補。
 - 配了 `authorizer`：讀 `message.metadata["token"]` 呼叫 `authorizer.verify(token)`。沒帶 token 或驗證失敗直接 `Denied`，**不會**退回 `default_principal`——否則 authorizer 形同虛設。
-
-**刻意不做的一件事：真的驗證呼叫方身份。** `PrincipalResolver` 就是那個縫，見上面的身份解析說明。
 
 ---
 

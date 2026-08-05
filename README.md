@@ -14,7 +14,7 @@ Design docs, in reading order:
 
 | | |
 |---|---|
-| [`03-agent-architecture-and-serving.md`](docs/design/03-agent-architecture-and-serving.md) | **Start here.** The framework: why `deepagents`, why the report rubric is inlined rather than progressively disclosed, why `a2a-sdk` is pinned to 0.3.x, the two ways callers reach the agent, and how the scheduler and A2A server share one process. |
+| [`03-agent-architecture-and-serving.md`](docs/design/03-agent-architecture-and-serving.md) | **Start here.** The framework: why `deepagents`, why the report rubric is inlined rather than progressively disclosed, why `a2a-sdk` is pinned to 1.1.2, the two ways callers reach the agent, and how the scheduler and A2A server share one process. |
 | [`00-architecture.md`](docs/design/00-architecture.md) | The input side: the three data sources, why the wiki is a toolset rather than an agent, and how scheduled vs. user-triggered runs get different clearance through different principals. |
 | [`01-config.md`](docs/design/01-config.md) | The env-driven config layer and how to point it at an internal LLM gateway. |
 | [`02-package-management.md`](docs/design/02-package-management.md) | Why uv over pip, and where dev dependencies live. |
@@ -93,11 +93,14 @@ uv run python examples/run_report.py --ask "What is our exposure on the ASC-4400
 uv run python examples/run_service.py                       # A2A server + scheduler, same process
 curl http://localhost:8000/.well-known/agent-card.json | jq
 
-# Send it a task (use message/stream instead for incremental progress over SSE)
-curl http://localhost:8000/ -H 'Content-Type: application/json' \
-  -d '{"jsonrpc":"2.0","id":"1","method":"message/send","params":{
-        "message":{"messageId":"m1","role":"user",
-                   "parts":[{"kind":"text","text":"our ASC-4400 exposure?"}]}}}'
+# Send it a task. The A2A-Version header and the body shape go together:
+# omit the header and the SDK reads the request as A2A 0.3. Swap SendMessage
+# for SendStreamingMessage to get incremental progress over SSE.
+curl http://localhost:8000/ \
+  -H 'Content-Type: application/json' -H 'A2A-Version: 1.0' \
+  -d '{"jsonrpc":"2.0","id":"1","method":"SendMessage","params":{
+        "message":{"messageId":"m1","role":"ROLE_USER",
+                   "parts":[{"text":"our ASC-4400 exposure?"}]}}}'
 ```
 
 Scheduled and on-demand runs are the same agent with a different `Principal`
@@ -114,7 +117,7 @@ scheduler survive running together).
 ## Test
 
 ```bash
-uv run pytest              # 133 tests, no credentials required
+uv run pytest              # 139 tests, no credentials required
 ```
 
 Coverage: namespace authorization, clearance-gated namespaces, the
@@ -124,7 +127,10 @@ caller cannot widen its own scope, that publishing without provenance is
 rejected, that a subagent never receives the write tool, that the report
 rubric really reaches the system prompt, LLM config and chat-model
 resolution, scheduler timing and failure isolation, and the A2A executor's
-principal resolution, streaming progress, task lifecycle and file artifacts.
+principal resolution, streaming progress, task lifecycle and file artifacts —
+plus six integration tests driving a real HTTP round trip through the wired
+app, which is the layer that caught a bug the executor unit tests structurally
+could not (`03-agent-architecture-and-serving.md` §4.3).
 
 The suite uses stubs and never calls a model. The framework migration was
 additionally driven end to end against a local OpenAI-compatible stub server

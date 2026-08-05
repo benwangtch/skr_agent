@@ -8,8 +8,8 @@
 
 > **這份文件取代了舊的 `01-config-and-serving.md`。** 那一版的 LLM 章節描述的是
 > Claude Agent SDK 的環境變數注入（`ANTHROPIC_BASE_URL` / `ANTHROPIC_AUTH_TOKEN`
-> 那一套），A2A 章節描述的是 `a2a-sdk` 1.x——兩者在換成 `deepagents` +
-> `a2a-sdk` 0.3.x 之後都不再成立，留著只會誤導，所以整份重寫。
+> 那一套），在換成 `deepagents` 之後不再成立；A2A 的部分現在歸
+> `03-agent-architecture-and-serving.md` §4 管。留著只會誤導，所以整份重寫。
 
 ---
 

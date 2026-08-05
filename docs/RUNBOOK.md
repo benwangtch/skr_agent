@@ -21,7 +21,7 @@ fixtures/                              4 家公司、5 頁 wiki（namespace: sup
 examples/
   run_report.py                        單次執行 skr agent（掃描或單一提問）
   run_service.py                       同時跑 A2A server + 排程
-tests/                                 133 個測試，6 個檔案，全部不需要金鑰
+tests/                                 139 個測試，6 個檔案，全部不需要金鑰
 ```
 
 ---
@@ -55,7 +55,7 @@ uv run python -c "from skr_agent.config import get_llm; l=get_llm(); print(l.pro
 ## 2. 跑單元測試（不花錢、不用金鑰）
 
 ```bash
-uv run pytest              # 133 個測試，約 3 秒
+uv run pytest              # 139 個測試，約 3 秒
 uv run pytest -q tests/test_wiki_authz.py     # 只跑某個檔案
 uv run pytest -k aggregation                  # 只跑名字符合的測試
 ```
@@ -67,7 +67,7 @@ uv run pytest -k aggregation                  # 只跑名字符合的測試
 | `test_wiring.py`（21） | 每個 agent 的 tool 清單、subagent 拿不到 write tool、報告規範真的進 prompt |
 | `test_config.py`（22） | LLM config 的 provider 預設值、env var 覆蓋、chat model 建構 |
 | `test_scheduler.py`（19） | cron 排程時序、job 失敗互不影響、hook 觸發 |
-| `test_a2a_server.py`（26） | A2A executor 的 principal 解析、streaming 進度、task 生命週期、file artifact |
+| `test_a2a_server.py`（32） | A2A executor 的 principal 解析、streaming 進度、task 生命週期、file artifact，加 6 個走真的 handler + HTTP 的整合測試 |
 
 **這些測試在改動任何一行程式碼後都該先過。** 它們用 stub agent（假的、瞬間回應、不呼叫模型）驗證系統的接線邏輯——如果這裡壞了，接上真的模型也不會變好，先把這層修好再往下走。
 
@@ -163,25 +163,37 @@ curl -s http://localhost:8000/.well-known/agent-card.json | python3 -m json.tool
 預期看到 `"name": "skr_agent"`、`skills` 陣列有 `skr_agent`、`capabilities.streaming` 是 `true`。
 
 ```bash
-curl -s http://localhost:8000/ -H 'Content-Type: application/json' \
-  -d '{"jsonrpc":"2.0","id":"1","method":"message/send","params":{
-        "message":{"messageId":"m1","role":"user",
-                   "parts":[{"kind":"text","text":"What incidents affected Acme Semiconductor?"}]}}}' \
+curl -s http://localhost:8000/ \
+  -H 'Content-Type: application/json' -H 'A2A-Version: 1.0' \
+  -d '{"jsonrpc":"2.0","id":"1","method":"SendMessage","params":{
+        "message":{"messageId":"m1","role":"ROLE_USER",
+                   "parts":[{"text":"What incidents affected Acme Semiconductor?"}]}}}' \
   | python3 -m json.tool
 ```
 
-預期 `result.status.state` 是 `completed`，`result.history` 裡有實際內容。
+預期 `result.task.status.state` 是 `TASK_STATE_COMPLETED`，`result.task.status.message.parts[0].text` 有實際內容（答案在**終態事件**上，不是中途的 working 事件——非串流呼叫方只看得到終態）。
 
-想看串流進度（長時間的 sweep 建議用這個），把 method 換成 `message/stream`，回應是 SSE：
+**`A2A-Version: 1.0` header 跟 body 格式必須配套**，這是 a2a-sdk 1.x 最容易踩的地方：header 沒帶時 SDK 會當成 `0.3`，不是當成「沒有版本」。實測三種組合：
+
+| header | body | 結果 |
+|---|---|---|
+| `A2A-Version: 1.0` | 1.0（`SendMessage`、`ROLE_USER`） | 正常 |
+| 不帶 | 0.3（`message/send`、`user`、`kind":"text"`） | 正常，走 v0.3 compat |
+| 不帶 | 1.0 | `VERSION_NOT_SUPPORTED`（版本不符，不是「缺 header」） |
+
+所以舊的 0.3 client 不用改也能繼續打（第二列），但要走 1.0 就 header 跟 body 都得換。
+
+想看串流進度（長時間的 sweep 建議用這個），method 換成 `SendStreamingMessage`，回應是 SSE：
 
 ```bash
-curl -N -s http://localhost:8000/ -H 'Content-Type: application/json' \
-  -d '{"jsonrpc":"2.0","id":"1","method":"message/stream","params":{
-        "message":{"messageId":"m2","role":"user",
-                   "parts":[{"kind":"text","text":"Sweep the critical tier"}]}}}'
+curl -N -s http://localhost:8000/ \
+  -H 'Content-Type: application/json' -H 'A2A-Version: 1.0' \
+  -d '{"jsonrpc":"2.0","id":"1","method":"SendStreamingMessage","params":{
+        "message":{"messageId":"m2","role":"ROLE_USER",
+                   "parts":[{"text":"Sweep the critical tier"}]}}}'
 ```
 
-預期先看到一連串 `"state":"working"` 的事件（`Working: search_news`、`Finished: search_news` 之類），最後才是 `"state":"completed"`、`"final":true`。
+預期先看到 `TASK_STATE_SUBMITTED`，接著一連串 `TASK_STATE_WORKING`（`Working: search_news`、`Finished: search_news` 之類），中間夾帶 `artifactUpdate`（如果報告產了檔案），最後是 `TASK_STATE_COMPLETED`。注意 1.x 的事件包在 `result.statusUpdate` / `result.artifactUpdate` 底下，不像 0.3 直接放在 `result`。
 
 排程那邊：等到 cron 觸發的分鐘數（用 `*/5` 的話最多等 5 分鐘），觀察第一個 terminal 的 log，應該看到：
 
@@ -206,7 +218,7 @@ scheduler.fire job=weekly-bom-sweep agent=skr_agent trace=...
 - Agent 會依問題類型選對 tool，不會對純內部查詢做整份掃描（3.5）
 - A2A server 跟排程可以在同一個 process 穩定跑，外部呼叫走得通（3.6）
 
-這六步涵蓋了 `docs/design/03-agent-architecture-and-serving.md` §8 列出的「已知限制」之外的核心行為。**沒有自動化的 e2e 測試**（§2 的 133 個測試都用 stub，不叫真的模型）——這是刻意的，因為每次 CI 跑都花 token、還會因為模型輸出的隨機性讓測試不穩定。真要把 §3 這幾步自動化，做法是寫一支跑在 CI 之外（例如手動觸發或排程跑一次）的 smoke test script，判準改成寬鬆的（例如「有沒有 citations」而不是「內容逐字符合」）——這份文件目前先提供人工跑過一遍的步驟，還沒做那支腳本。
+這六步涵蓋了 `docs/design/03-agent-architecture-and-serving.md` §8 列出的「已知限制」之外的核心行為。**沒有自動化的 e2e 測試**（§2 的 139 個測試都用 stub，不叫真的模型）——這是刻意的，因為每次 CI 跑都花 token、還會因為模型輸出的隨機性讓測試不穩定。真要把 §3 這幾步自動化，做法是寫一支跑在 CI 之外（例如手動觸發或排程跑一次）的 smoke test script，判準改成寬鬆的（例如「有沒有 citations」而不是「內容逐字符合」）——這份文件目前先提供人工跑過一遍的步驟，還沒做那支腳本。
 
 ## 5. 常見卡住的地方
 
@@ -215,6 +227,7 @@ scheduler.fire job=weekly-bom-sweep agent=skr_agent trace=...
 | 一啟動就報 missing credentials | `LLM_API_KEY` 沒填——現在是建構時就擋，不是跑到一半 | §1 |
 | `run_report.py` 卡住很久或連線類錯誤 | `LLM_BASE_URL` 指向連不到的 gateway | §1 |
 | 報告寫進錯的 namespace | 檢查是不是漏帶 `--scheduled`（會用不同 principal） | §3.2 / §3.4 |
-| A2A `curl` 回 method not found | a2a-sdk 0.3.x 的 method 名是 `message/send` / `message/stream`（不是 1.x 的 `SendMessage`） | §3.6 |
+| A2A `curl` 回 `VERSION_NOT_SUPPORTED` | 帶了 1.0 的 body 但沒帶 `A2A-Version: 1.0` header——沒帶會被當成 0.3 | §3.6 |
+| A2A `curl` 回 method not found | 1.x 的 method 名是 `SendMessage` / `SendStreamingMessage`；`message/send` 是 0.3 的名字（不帶 header 時才走那條） | §3.6 |
 | 排程一直不觸發 | cron 表達式算的下一次時間比想像中晚——`*/5 * * * *` 最多等 5 分鐘，不是啟動時立刻跑（這是真正的 cron 語意，見 design doc §5） | §3.6 |
 | 想確認 wiki 真的被寫入，但 `list_namespaces()` 看不出新舊 | 用 `-v` 開 log，找 `wiki.write` 那行 | §3.2 |
