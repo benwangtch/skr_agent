@@ -1,6 +1,6 @@
 # Runbook — 怎麼跑起來、怎麼驗證
 
-這份文件回答兩個問題：「怎麼執行這支程式」和「怎麼確認它真的動」。架構決策不在這裡——那些在 `docs/design/03-agent-architecture-and-serving.md`（框架、A2A、排程）和 `00-architecture.md`（資料來源與授權）。這裡只講操作。
+這份文件回答兩個問題：「怎麼執行這支程式」和「怎麼確認它真的動」。架構決策不在這裡——那些在 [`docs/design/DESIGN.md`](design/DESIGN.md)。這裡只講操作。
 
 目前的測試套件（`uv run pytest`）**完全不需要 API 金鑰**，因為它測的是接縫（授權規則、principal 解析、排程時序、A2A 訊息轉換），不是叫真的模型。所以「真的跑起來看它動」跟「跑測試」是兩件不同的事，這份文件把兩者都寫清楚，中間那段 §3 是實際會呼叫 LLM、花錢、需要金鑰的部分。
 
@@ -48,7 +48,7 @@ uv run python -c "from skr_agent.config import get_llm; l=get_llm(); print(l.pro
 # 應該看到 openrouter https://openrouter.ai/api/v1 qwen/qwen3.5-plus-02-15
 ```
 
-換成別的 provider（OpenAI / Anthropic，或公司內部 gateway）：見 `docs/design/03-agent-architecture-and-serving.md` §2.2，只改 `.env`，不改程式碼。內部 gateway 只要有 OpenAI-compatible 的 `/v1/chat/completions` 就能直接接，設 `LLM_PROVIDER=custom` + `LLM_BASE_URL` + `LLM_MODEL`。
+換成別的 provider（OpenAI / Anthropic，或公司內部 gateway）：見 `docs/design/DESIGN.md` §6，只改 `.env`，不改程式碼。內部 gateway 只要有 OpenAI-compatible 的 `/v1/chat/completions` 就能直接接，設 `LLM_PROVIDER=custom` + `LLM_BASE_URL` + `LLM_MODEL`。
 
 ---
 
@@ -211,7 +211,7 @@ scheduler.fire job=weekly-bom-sweep agent=skr_agent trace=...
 
 ## 3.7 接上你自己的 MCP service
 
-設定在 `.env`（細節見 `docs/design/01-config.md` §3）：
+設定在 `.env`（細節見 `docs/design/DESIGN.md` §6）：
 
 ```bash
 MCP_URL=https://mcp.internal.corp/mcp
@@ -251,7 +251,7 @@ uv run python examples/run_report.py --ask "<一個需要用到你 MCP tool 的�
 
 **MCP 呼叫不會帶上觸發者的身份。** `MCP_TOKEN` 是連線層級的服務憑證，所以不管是誰觸發這次執行（一般使用者 / 排程帳號 / A2A 呼叫方），MCP server 看到的都是同一個身份。
 
-也就是說：**只接「這個 agent 權限最低的使用者也可以看到全部內容」的 MCP server。** 如果那個 service 內部有 per-user 權限，現在這個接法會繞過它。細節見 `docs/design/03-agent-architecture-and-serving.md` §3.4。
+也就是說：**只接「這個 agent 權限最低的使用者也可以看到全部內容」的 MCP server。** 如果那個 service 內部有 per-user 權限，現在這個接法會繞過它。細節見 `docs/design/DESIGN.md` §5.5。
 
 ---
 
@@ -313,7 +313,7 @@ print('prompt 長度:', len(p))
 - A2A server 跟排程可以在同一個 process 穩定跑，外部呼叫走得通（3.6）
 - （若有設定）MCP tool 載得到、模型會用、而且留下 `mcp://` citation（3.7）
 
-這六步涵蓋了 `docs/design/03-agent-architecture-and-serving.md` §8 列出的「已知限制」之外的核心行為。**沒有自動化的 e2e 測試**（§2 的 167 個測試都用 stub，不叫真的模型）——這是刻意的，因為每次 CI 跑都花 token、還會因為模型輸出的隨機性讓測試不穩定。真要把 §3 這幾步自動化，做法是寫一支跑在 CI 之外（例如手動觸發或排程跑一次）的 smoke test script，判準改成寬鬆的（例如「有沒有 citations」而不是「內容逐字符合」）——這份文件目前先提供人工跑過一遍的步驟，還沒做那支腳本。
+這六步涵蓋了 `docs/design/DESIGN.md` §9 列出的「已知限制」之外的核心行為。**沒有自動化的 e2e 測試**（§2 的 167 個測試都用 stub，不叫真的模型）——這是刻意的，因為每次 CI 跑都花 token、還會因為模型輸出的隨機性讓測試不穩定。真要把 §3 這幾步自動化，做法是寫一支跑在 CI 之外（例如手動觸發或排程跑一次）的 smoke test script，判準改成寬鬆的（例如「有沒有 citations」而不是「內容逐字符合」）——這份文件目前先提供人工跑過一遍的步驟，還沒做那支腳本。
 
 ## 5. 常見卡住的地方
 

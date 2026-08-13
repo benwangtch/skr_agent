@@ -9,7 +9,7 @@ That authorization is enforced here, in the tool layer, against a principal
 the caller cannot forge. Putting an LLM in front of these tools would add a
 model hop, a summarization step that loses citations, and latency, while
 enforcing nothing the tool layer does not already enforce — see
-``docs/design/00-architecture.md`` §2.
+``docs/design/DESIGN.md`` §5.2.
 """
 
 from __future__ import annotations

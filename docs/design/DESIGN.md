@@ -1,0 +1,373 @@
+# skr agent — 設計文件
+
+狀態：實作完成，對應現行程式碼
+範圍：整個 `src/skr_agent/`
+
+這份文件描述系統**現在的樣子**。它取代了先前的 `00-architecture.md`、`01-config.md`、`03-agent-architecture-and-serving.md`——那三份是不同時間點寫的，各自帶著「上一版我判斷錯了」的修訂記錄，疊在一起之後同一件事有三個地方講、而且開始互相矛盾。演進過程在 git log 裡，這裡只講結論。
+
+操作手冊（怎麼跑、怎麼驗證）在 [`../RUNBOOK.md`](../RUNBOOK.md)。套件管理在 [`02-package-management.md`](02-package-management.md)。
+
+---
+
+## 1. 這是什麼
+
+**skr agent 是一個 deep research agent。** 它接開放式問題（「這週供應鏈有什麼事」、「ASC-4400 的曝險多少」），自己決定要挖多深，跨多個資料來源交叉比對，產出**每個主張都有出處**的報告，並發布到內部 wiki。
+
+它可以被三種方式觸發，走的是同一條程式碼路徑：
+
+| 觸發方式 | 入口 | 身份 |
+|---|---|---|
+| 同 process 的另一個 agent | `mesh.agent_as_tool` | 呼叫方的 `Principal`（closure 綁定） |
+| 跨 process 的 A2A 呼叫 | `serving/a2a.py` | token 經 `Authorizer.verify()` 重新驗證 |
+| cron 排程 | `serving/scheduler.py` | `service_principal()` |
+
+**「誰觸發」決定「看得到什麼」**，這是整個系統的核心不變式，第 5 節展開。
+
+---
+
+## 2. 決策摘要
+
+| 問題 | 決定 | 理由 |
+|---|---|---|
+| 執行框架 | LangChain **`deepagents`**（LangGraph 之上） | 內建 planning/todo、context 摘要、subagent 委派、virtual filesystem——§3.1 |
+| 模型怎麼接 | LangChain `BaseChatModel`，由 `config/llm.py` 建 | 不綁 wire protocol，內部 gateway 有 OpenAI-compatible endpoint 就能接——§6 |
+| 怎麼讓它擅長 deep research | scratchpad + 發布前 fact-checker + 停止條件 + 矛盾攤開 | 框架只給 loop 和委派，研究品質是這四個決定堆出來的——§4 |
+| 報告規範怎麼載入 | inline 進 system prompt，不用 `skills=` 的按需載入 | 必須遵守的規範不該靠模型記得去讀檔——§3.3 |
+| wiki 是 agent 還是 tool | **一組掛授權的 tools**，不是 agent | 它要解決的是授權，授權是規則查表不是推理——§5.2 |
+| 定期報告 vs 使用者觸發 | 同一個 agent，不同 `Principal` | 差別是誰在問，不是問什麼——§5.3 |
+| 授權檢查幾個動作 | **三個：讀、寫、聚合** | 只查讀寫會漏掉「每步都合法、合起來外洩」——§5.4 |
+| A2A SDK 版本 | `a2a-sdk` **1.1.2**（釘死） | 1.1.2 是最新的 1.x；這套件 API 變動很兇——§7.1 |
+| 排程 | 自寫的 in-process `Scheduler` | 要跟 A2A server 共用同一份資料來源與 principal 邏輯——§7.4 |
+| A2A 與排程的部署 | 同一個 process、同一個 `asyncio.gather` | 兩者只是「誰觸發」的不同入口——§7.5 |
+| MCP service | 第四種資料來源，啟動時載入一次 | tool 本來就是 LangChain tool；但**身份不會傳過去**——§5.5 |
+| 套件內 import | 一律絕對 import | 有測試擋著，見 §8 |
+
+---
+
+## 3. 執行框架
+
+### 3.1 為什麼是 deepagents
+
+`deepagents` 內建了一個 deep research agent 本來就需要、自己寫很花時間的東西：
+
+- **planning / todo 狀態**——掃 20 家公司不會默默漏掉幾家
+- **context 摘要**（`SummarizationMiddleware`）——長時間研究一定會撐爆 context
+- **subagent 委派**（`task` tool）——每家公司一個獨立 context window
+- **virtual filesystem**——中間筆記有地方放（§4.1 大量用到）
+
+`runtime.py::DeepAgent` 刻意只是薄薄一層殼：把 `AgentRequest` 轉成 graph 輸入、graph 輸出轉回 `AgentResponse`、把 principal 綁進 tools。framework 給的東西一個都沒重做。
+
+### 3.2 三層職責
+
+```
+protocol.py     契約層。Principal / AgentRequest / AgentResponse / AgentSpec /
+                Budget / Citation。不 import 任何 agent framework。
+                    ↑ 從 Claude Agent SDK 換成 deepagents 時，這層一行都沒改，
+                      A2A serving、排程、授權模型因此全部原封不動沿用。
+                      不是巧合，是刻意把 framework 擋在契約外面換來的。
+
+runtime.py      執行殼。DeepAgent 包住 create_deep_agent。
+
+serving/        怎麼被外部觸發到。
+```
+
+### 3.3 Skill 為什麼 inline
+
+`create_deep_agent(skills=...)` 的載入機制是 **progressive disclosure**：prompt 裡只放 skill 的名字和描述，模型自己判斷要不要 `read_file` 去讀本文。
+
+`.claude/skills/incident-report/SKILL.md`（報告格式 + 嚴重度分級）是**每次跑都必須遵守**的規範，不是「碰巧有用就查」的參考。所以 `runtime.py::load_skill()` 直接讀檔（去掉 YAML frontmatter，那是給 catalog 用的 metadata）接到 system prompt 後面。
+
+**這不代表 `skills=` 是錯的設計。** 等 skill 有十幾二十份、大部分情況只有一兩份相關時，按需載入才是對的取捨。**界線大約在十份**——現在一份，inline 是對的。加第三、第四份 skill 的人請重新評估。
+
+加一份 skill：建 `.claude/skills/<name>/SKILL.md`，名字加進 `report/agent.py` 的 `DEFAULT_SKILLS`。
+
+---
+
+## 4. 讓它擅長 deep research 的四個設計
+
+框架給的是 agent loop 和委派機制。**研究品質是下面四個決定堆出來的。**
+
+### 4.1 Scratchpad：investigator 寫檔案，lead 讀檔案
+
+掃 20 家公司時，如果每個 investigator 把完整發現塞回 lead 的對話裡，lead 的 context 會爆掉、然後被 `SummarizationMiddleware` 壓縮——**壓縮掉的通常正是 citation 這種結構化細節**，而那是這份報告唯一的價值。
+
+所以：investigator 把完整發現寫進 `/findings/<company_id>.md`，回覆只給一句摘要 + 檔案路徑；lead 用 `read_file` 從檔案彙整。
+
+成立前提是**虛擬檔案系統在 agent 與 subagent 之間雙向共用**。這點實測過，不是照文件假設：subagent 寫的檔案會出現在 parent 的 state 裡（`_EXCLUDED_STATE_KEYS` 只排除 `todos`/`messages`/`structured_response`，不含 `files`）。
+
+一個容易誤解的地方：`company-investigator` 「建構上唯讀」指的是**對 wiki 唯讀**（拿不到 `wiki_write_page`，那才是有授權意義的邊界）。它對虛擬檔案系統一直有寫入權——`deepagents` 不管 `tools` 給什麼，都會給每個 subagent 一份 `FilesystemMiddleware`。
+
+### 4.2 發布前必過 fact-checker
+
+Deep research 最常見的失敗不是查不到，是**寫出一句看起來合理、但沒有任何來源真的這樣說的話**。
+
+`fact-checker` subagent 拿到草稿與它宣稱的來源，逐條判 Supported / Overstated / Unsupported / Contradicted，給 PASS 或 REVISE。兩個刻意的限制：
+
+- **不給任何 search tool。** 能自己找新資料的 checker 會變成在做研究而不是查核，而且它「確認」的可能是報告根本沒引用的來源。它只有 `fetch_article` / `wiki_read_page` / `get_bom_company`，用來**重讀已被引用的來源**。
+- **prompt 明講不准用「刪掉 citation」消 REVISE。** 沒有來源的宣稱，正確處理是拿掉那句話或找到來源。
+
+代價：每份報告多一次 model pass。拿 token 換可稽核性。
+
+### 4.3 明確的停止條件
+
+「什麼時候算查完」不寫的話，模型會往兩個方向失敗：抓到第一個看起來對的答案就收工，或一直挖不知道停。草擬前的檢查點：
+
+- 範圍內哪些公司沒有 finding 檔案？（那是缺口，不是乾淨結果）
+- 哪些宣稱只有單一來源？
+- 什麼資訊會改變嚴重度判斷？便宜的話就去查。
+
+**是檢查不是儀式**——沒缺就說沒缺然後往下走。
+
+### 4.4 矛盾要攤開
+
+外部新聞與內部記錄對不上時，模型的預設行為是安靜挑一個比較順的。但**那個矛盾本身通常才是整份報告最有價值的東西**。prompt 要求兩邊都寫、都附來源、並說明比較相信哪一個與為什麼。
+
+---
+
+## 5. 資料來源與授權
+
+### 5.1 四個來源，地位平等
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│                    skr agent (report/agent.py)               │
+│                                                              │
+│  BOM              list_bom_companies / get_bom_company       │
+│  外部新聞          search_news / fetch_article                 │
+│  內部 wiki         wiki_search / wiki_read_page /             │
+│                   wiki_write_page      ← 唯一有授權模型的來源    │
+│  MCP server(s)    你設定的任何 tool（預設無）  ← 身份不傳，見 5.5  │
+│                                                              │
+│  subagents: company-investigator（唯讀）、fact-checker（唯讀）  │
+└─────────────────────────────────────────────────────────────┘
+```
+
+一份有價值的報告需要交叉比對：只看新聞會把三個月前就記錄過的舊事當新聞，只看 wiki 永遠不知道外面發生什麼。
+
+**wiki 在程式碼上獨立成一個 package，只因為它是唯一有授權模型的來源。** BOM 和新聞對所有觸發者都一樣，wiki 不是。這個不對稱是 5.2–5.4 的全部內容。
+
+### 5.2 wiki 為什麼不是 agent
+
+授權要求的是「namespace 規則寫在一個地方」，不要求「那個地方是一個 LLM」。授權是規則判斷（principal 的 division/role 對照一張表），不需要推理。包進 agent 多出來的是：一次 model round trip 的延遲與成本、一次**最容易弄丟 citation** 的摘要、以及一個新的 prompt injection 攻擊面。
+
+tool 層已經解決了：`wiki_search` 的 handler 直接呼叫 `authz.check_read(principal, namespace)`，principal 是**閉包捕獲、不是參數**——模型無法在 tool call 裡寫一個不同的 division 冒充別人，因為 schema 裡根本沒這個欄位。
+
+`wiki/coordinator.py`（opt-in 的 `wiki_ask`）是為「wiki 團隊想主動擁有檢索品質（query rewriting、多跳、reranking）」留的骨架，預設關閉，目前沒有 caller。**一直沒人用就該刪掉**，不要當「以防萬一」的技術債留著。
+
+### 5.3 兩種 principal
+
+```python
+# principals.py
+service_principal()   # 跨 division 讀，只能寫進 exec namespace
+user_principal(...)   # 只讀自己 division + shared；有 wiki.writer 也只寫自己 division
+```
+
+同一支 agent、同一個 prompt，跑出來的報告完全不同——**這是設計上要的**。使用者問「我們的供應風險」，看到的是他 division 能看到的頁面組成的答案；排程跑同一件事，看到的是跨部門彙整。
+
+`service_principal()` 刻意**不帶** `wiki.admin`：讀取範圍放寬，寫入仍只有 exec namespace，所以週報裡的一段 prompt injection 沒辦法把排程帳號變成任意寫入的憑證。
+
+### 5.4 三個檢查點：讀、寫、聚合
+
+只把授權做在「讀」和「寫」會漏掉一個沒人故意設計、但邏輯上必然出現的洞：
+
+排程 agent 用 `wiki.reader.all` 讀了 supply、finance、platform 三個 namespace，每一次讀都個別合法。彙整成報告後如果寫進 clearance 不足的 namespace，內容就從「高層限定」洩漏成「任何人可讀」——**而整個過程沒有任何一步單獨違規**。
+
+```python
+# wiki/authz.py::WikiAuthorizer
+check_read(principal, namespace)          # 讀
+check_write(principal, namespace)         # 寫
+check_aggregation(target, sources)        # 聚合 ← 這個
+#   規則一：來源的 clearance 不能比目標寬
+#   規則二：來源橫跨兩個以上 division，目標必須是有 clearance 的 namespace
+```
+
+`tests/test_wiki_authz.py` 有一個對 `shared` 有寫入權的 admin，把跨兩個 division 的內容寫進 `shared`：`check_write` 放行，`check_aggregation` 擋下。**兩層獨立檢查，不是一層查兩次。**
+
+另外 `exec` namespace 的讀取需要 `wiki.exec` role，不是靠 division 自動給——一般使用者就算 division 剛好叫 `exec` 也拿不到。
+
+### 5.5 MCP：身份不會傳過去
+
+公司內部 MCP service 可以掛成第四種資料來源（設定見 §6）。**預設完全關閉**：`MCP_*` 一個都沒設就不會連任何地方。
+
+三個設計決定：
+
+- **啟動時載入一次。** `ToolsetFactory` 是同步、每 request 呼叫；MCP 探索是網路往返。所以啟動時載入，factory 只發已載好的物件。每次**呼叫**仍各自開 session。代價：server 之後新增的 tool 要重啟才看得到。
+- **連不上就降級。** 記一行 `mcp.load_failed` 跳過。輔助資料來源掛掉應該讓 agent 少幾個 tool，不是讓它起不來。
+- **每個 MCP tool 包一層記 `Citation`**（`mcp://<server>/<tool>`）。prompt 要求每個事實都有出處，MCP 來的資料就得有東西可指。
+
+> **⚠️ 這個整合最重要的限制：身份不會傳過去。**
+> 其他每個 tool 都 closure 綁著呼叫者的 `Principal` 並對它授權。MCP tool 做不到——憑證是**連線層級**的（`MCP_TOKEN`），從 MCP server 角度看，不管誰觸發都是同一個 service account。
+>
+> **只接「這個 agent 權限最低的呼叫者也可以看到全部內容」的 MCP server。** 如果那個 service 有 per-user 規則，現在這個接法會繞過它。要修就得改成 per-request 建 client 帶終端使用者的 token。
+
+MCP tool **不給 subagent**：`company-investigator` 拿的是寫死的白名單，而我們無從得知某個 MCP tool 會不會改狀態。確認安全後把名字加進 `INVESTIGATOR_TOOLS` 即可。
+
+---
+
+## 6. Config 層
+
+一個服務一個檔案、一個 class、一個 `env_prefix`，全部繼承 `BaseConfig`。**目的是把「搬進公司環境」壓到「改 `.env`」。**
+
+```
+config/  base.py  llm.py（接上）  mcp.py（接上，預設關）  db.py / minio.py（佔位）
+```
+
+pydantic v2 下的關鍵行為（有測試驗證）：**子類別的 `model_config` 會跟父類別合併，不是整個蓋掉**——所以子類同時有 `env_file`（繼承）和 `env_prefix`（自己設的）。
+
+**唯一規則**：這個資料夾外面不准直接讀 `os.environ`。所有設定經過某個 `get_*()`（都是 `lru_cache` singleton；測試用 `reset_settings_cache()`）。
+
+**LLM**：`build_chat_model()` 回傳**建構好的物件**而非 `"provider:model"` 字串——字串帶不了 `base_url`，而「指到不同 endpoint」正是這個 config 存在的理由。
+
+```bash
+LLM_PROVIDER=custom
+LLM_BASE_URL=https://llm.internal.corp/v1   # OpenAI-compatible chat-completions
+LLM_API_KEY=內部憑證
+LLM_MODEL=內部 model 名稱
+```
+
+`custom` 走 OpenAI chat-completions——**絕大多數內部 gateway（vLLM、LiteLLM、公司 proxy）本來就開這個介面**，不用翻譯層。金鑰沒填會在**建構時**報錯，不是跑到一半才失敗。
+
+**MCP**：單一 server 用 `MCP_URL` + `MCP_TOKEN`；多個或 stdio 用 `MCP_SERVERS`（JSON）。兩者都設時 **`MCP_SERVERS` 整組蓋過 `MCP_URL`，不是合併**——合併到一半的連線設定比明顯被忽略的變數難除錯得多。
+
+---
+
+## 7. Serving
+
+### 7.1 A2A：版本是 1.1.2
+
+`serving/a2a.py` 把 skr agent 包成講 A2A（JSON-RPC + SSE）的 FastAPI app。**1.1.2 是 PyPI 上最新的 1.x**（1.0.0 → 1.0.3 → 1.1.0 → 1.1.2，沒有 1.2/1.3）。釘死版本，因為 0.3.x → 1.x 每一項都是破壞性變更：
+
+| 0.3.x | 1.1.x |
+|---|---|
+| `A2AStarletteApplication` | **模組不存在**。改用 `create_*_routes()` + `add_a2a_routes_to_fastapi()`，所以 `build_a2a_app()` 直接回 `FastAPI`，沒有 `.build()` |
+| pydantic 型別 | **protobuf 型別**。`TextPart`/`FilePart` 不存在，`Part` 是扁平訊息（`text`/`raw`/`url`/`data` oneof + `filename`/`media_type`），檔案放 raw bytes |
+| `TaskStatusUpdateEvent(final=True)` | **沒有 `final` 欄位**，終態由 state 決定，`TaskUpdater` 會擋終態後的更新 |
+| `TaskState.completed` | `TaskState.TASK_STATE_COMPLETED` |
+| `AgentCard.url` | `AgentCard.supported_interfaces` |
+| metadata 是 dict | protobuf `Struct`，要 `MessageToDict` 遞迴轉 |
+
+### 7.2 `A2A-Version` header 與 body 必須配套
+
+**header 沒帶不是「沒有版本」，SDK 會當成 `0.3`。** 實測（`enable_v0_3_compat=True`）：
+
+| header | body | 結果 |
+|---|---|---|
+| `A2A-Version: 1.0` | 1.0（`SendMessage`、`ROLE_USER`） | 正常 |
+| 不帶 | 0.3（`message/send`、`user`） | 正常，走 compat adapter |
+| 不帶 | 1.0 | `VERSION_NOT_SUPPORTED` |
+
+失敗訊息是**版本不符**（拿 1.0 body 比對預設的 0.3），不是「缺 header」。留著 compat 是讓既有 0.3 client 不改也能打。
+
+### 7.3 一次請求的生命週期
+
+```
+SendMessage / SendStreamingMessage
+  → enqueue Task(TASK_STATE_SUBMITTED)     ← 必須第一個，見下
+  → 沒有輸入文字 → failed，不叫 agent
+  → resolve_principal(metadata, call_context)
+      Denied → failed，內容是拒絕原因，不是 500
+  → submit() → start_work()
+  → async for event in agent.stream(request):
+        progress → update_status(TASK_STATE_WORKING, ...)
+        AgentResponse → 最終結果
+  → 檔案 → artifact event；文字 → 收集
+  → complete(message=答案) / failed(message=答案)
+```
+
+**兩個實際踩到的坑：**
+
+1. **Executor 必須先 enqueue 一個 `Task`。** `DefaultRequestHandler` 拒絕在 Task 開出來前抵達的 status event，而 `TaskUpdater.submit()` 送的是 status update **不是 Task**。這個 bug **整套 unit test 都沒抓到**（裸的 `EventQueue` 對事件順序沒意見），是實際發 HTTP 請求才炸出來的——所以有了 `TestThroughTheRealHandler`。
+2. **答案放在終態事件上。** 舊做法把答案當 `working` 訊息送、終態不帶內容，對串流呼叫方沒差，但**非串流的 `SendMessage` 只看得到最終 Task**，於是拿到空答案。
+
+**progress 只講「跑了哪個 tool」，不回傳 tool 輸出**（`runtime.py::_progress_note`）——tool 回傳經常包含呼叫方沒權限看的東西，progress feed 不該成為繞過 tool 層授權的側漏管道。
+
+**身份**：沒配 `authorizer` 時每個呼叫方都是 `default_principal`（唯讀、`shared`），啟動時印一行警告。配了就讀 `metadata["token"]` 驗證，失敗直接 `Denied`，**不會**退回 default——否則 authorizer 形同虛設。
+
+### 7.4 排程
+
+```python
+ScheduledJob(name, cron, agent, task, principal, inputs, budget, timezone)
+Scheduler(jobs).run_forever(poll_interval=30)
+```
+
+`principal` 可傳 callable，每次觸發現拿一個新的（`service.py` 就是傳 `service_principal` 函式本身）。
+
+**為什麼不是 Claude Managed Agents 的 scheduled deployment**：那是另一個代管平台，接的話 agent 要在那邊重新部署、重接資料來源連線。但排程本來就該跟 A2A server 用同一份 mesh。**這是刻意取捨**：等到某個 job 需要自己的 scaling、或需要在 process 重啟後接續（現在完全沒有持久化），那才是換過去的時間點。
+
+三個容易誤會的語意：`due_jobs()` 是純函式、`run_job()` 才推進排程；job **依序執行不平行**（排程器不該是兩個 sweep 搶著發布同一頁 wiki 的地方）；單一 job 失敗不影響其他 job。
+
+### 7.5 部署形態：一個 process，兩個入口
+
+```python
+mcp_toolset = await mcp_toolset_from_config()          # 啟動時一次
+mesh = build_mesh(..., extra_toolsets=[mcp_toolset] if mcp_toolset else ())
+app = build_a2a_app(mesh.report_agent, url=..., registry=mesh.registry)
+await asyncio.gather(
+    uvicorn.Server(...).serve(),
+    Scheduler(default_jobs(mesh, cron=cron)).run_forever(...),
+)
+```
+
+一個 event loop、一個 agent 實例、兩件事掛在上面。**兩者呼叫同一個 agent、同一份 backend**，所以排程寫入的東西馬上能透過 A2A 讀到，不用處理兩個獨立部署之間的資料一致性。`Ctrl+C` 同時停掉兩者。
+
+---
+
+## 8. 測試策略
+
+```
+167 個測試，全部不需要金鑰、不呼叫模型
+  test_wiki_authz.py  32   namespace 授權、clearance、aggregation leak
+  test_a2a_server.py  32   executor 生命週期 + 6 個走真 handler/HTTP 的整合測試
+  test_wiring.py      30   tool 清單、subagent 邊界、deep research 結構、import 風格
+  test_config.py      22   provider 預設、env 覆蓋、chat model 形狀
+  test_scheduler.py   19   cron 時序、失敗隔離
+  test_mcp.py         17   設定解析、降級、對真的 MCP server 載入/呼叫/citation
+  test_mesh.py        15   agent-as-tool 的 principal 綁定、citation 傳遞
+```
+
+三個刻意的選擇：
+
+- **不呼叫模型。** 測的是接縫（授權規則、principal 解析、排程時序、訊息轉換）。每次 CI 花 token、又因模型隨機性而不穩定的測試不值得。真的跑一次的步驟在 RUNBOOK §3。
+- **MCP 測試跑真的 MCP server subprocess**，不 mock client——會壞的是跟 `langchain-mcp-adapters` 的契約，mock 那個契約只是把自己的假設複述一遍。用 `-m "not mcp_server"` 可跳過。
+- **A2A 有整合測試走真的 handler + HTTP。** 因為 unit test 結構上抓不到 §7.3 那個 bug。
+
+---
+
+## 9. 已知限制
+
+**授權 / 安全**
+
+1. **A2A 呼叫方預設沒有真的身份驗證。** `Authorizer` 是留好的縫，沒配之前所有外部呼叫方共用一個唯讀匿名身份。對外開放前必須接。
+2. **MCP 不傳遞使用者身份**（§5.5）。這是目前最需要注意的一條。
+3. **排程憑證怎麼發還沒定。** `service_principal()` 現在是函式呼叫，production 要決定從哪來、怎麼輪替、怎麼吊銷。
+4. **`clearance` 寫死在 `WikiAuthorizer` 建構子裡。** 真有多個 gated namespace 時要變設定檔或從身分系統查。
+5. **BOM 與新聞沒有授權模型。** 目前假設能觸發這個 agent 的人都能看整份 BOM。之後要分級的話照 §5.2 的形狀補一個 `authz.py`，不要在 prompt 裡叫 agent 自己小心。
+
+**研究品質**
+
+6. **查詢改寫只寫在 prompt 裡，沒有結構化。** investigator 被要求輪過法人名/別名/母公司/料號/事件詞，但沒有東西保證它跑完。
+7. **深度不隨 tier 變。** `critical` 與 `standard` 供應商目前花一樣的力氣。
+8. **來源品質/時效沒有權重。** 嚴重度有 rubric，「這個來源可不可信、是不是三年前的」沒有。
+
+**執行 / 運維**
+
+9. **排程狀態不持久化。** process 重啟後重算下次觸發時間，錯過的不補跑。
+10. **A2A task 歷史存在記憶體**（`InMemoryTaskStore`），重啟掉光。
+11. **`Budget.max_usd` 沒有真的被強制**，deadline 只在進入時檢查一次，`cost_usd` 恆為 0。
+12. **沒有迴圈偵測。** 目前拓撲用不到，開放給第三方 agent 時會需要。
+13. **MCP tool 只在啟動時探索一次**，server 之後新增的 tool 要重啟。
+14. **`wiki/coordinator.py` 沒有 caller**（§5.2）。
+
+---
+
+## 10. 給要新增 feature 的人
+
+三個問題，順序很重要：
+
+1. **需要授權嗎？** 需要 → 規則寫進一個 `authz.py`，掛成 tool（§5.2 的形狀），**不要預設包一個 agent**。
+2. **步驟數事先可知嗎？** 不可知 → `DeepAgent`；可知 → 直接呼叫 chat model，不要為了「架構一致」硬套 agent。
+3. **會被多種 principal 呼叫嗎？**（使用者／排程／第三方）會 → 現在就把各自的 grant 寫清楚（像 `principals.py`），不要假設「輸入一樣，輸出應該也一樣」——那個假設就是 §5.4 那個洞的來源。
+
+新增一個 IO service：複製 `config/db.py` 的形狀（一個檔案、一個 class、一個 `env_prefix`、一個 cached getter、在 `__init__.py` 匯出）。
+
+套件內 import 一律**絕對 import**（`from skr_agent.x import y`），`tests/test_wiring.py::TestImportStyle` 擋著。

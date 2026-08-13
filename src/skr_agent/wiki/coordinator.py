@@ -12,7 +12,7 @@ That is a real reason to add an agent, and it composes cleanly: this is a
 ``DeepAgent`` built from the same ``make_wiki_toolset``, wrapped as one more
 ``AgentSpec`` a registry can hand out. It is not required. See
 ``assembly.build_mesh(with_wiki_agent=...)`` and
-``docs/design/00-architecture.md`` §2 for why it defaults to off — direct tool
+``docs/design/DESIGN.md`` §5.2 for why it defaults to off — direct tool
 mounting already enforces authorization and returns citations; putting a model
 in front adds a hop and a summarization step that can drop them.
 """

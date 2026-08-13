@@ -12,7 +12,7 @@ doesn't try to be that.
 Every job runs under a ``Principal`` the caller supplies, usually
 ``service_principal()`` — that's what gives a scheduled sweep the
 cross-division read and exec-namespace write access a user-triggered run
-doesn't get. See ``docs/design/00-architecture.md`` §5 and ``principals.py``.
+doesn't get. See ``docs/design/DESIGN.md`` §5.3 and ``principals.py``.
 """
 
 from __future__ import annotations

@@ -8,7 +8,7 @@ dependencies = [
     "langchain-anthropic>=1.5.3",
     "langchain-openai>=1.4.1",
     "pydantic-settings>=2.5",
-    "a2a-sdk[http-server]==1.1.2", # pinned: 1.1.2 is the newest published 1.x; the API moves fast (see docs/design/03-agent-architecture-and-serving.md §4)
+    "a2a-sdk[http-server]==1.1.2", # pinned: 1.1.2 is the newest published 1.x; the API moves fast (see docs/design/DESIGN.md §7.1)
     "fastapi>=0.110",
     "uvicorn[standard]>=0.30",
     "croniter>=2.0",

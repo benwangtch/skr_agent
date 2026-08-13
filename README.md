@@ -11,21 +11,19 @@ investigators write findings to a shared scratchpad so a wide sweep does not
 blow up the lead's context, a read-only `fact-checker` re-reads primary
 sources and must return PASS before anything publishes, an explicit stopping
 check runs before drafting, and contradictions between sources get surfaced
-rather than silently resolved. See design doc §2.4.
+rather than silently resolved. See `DESIGN.md` §4.
 
 Its data sources are peers: the **bill of materials**, **external news**, the
 **internal wiki**, and any **MCP servers** you point it at. The wiki gets its
 own module only because it is the one source with an authorization model to
 enforce.
 
-Design docs, in reading order:
-
-| | |
-|---|---|
-| [`03-agent-architecture-and-serving.md`](docs/design/03-agent-architecture-and-serving.md) | **Start here.** The framework: why `deepagents`, why the report rubric is inlined rather than progressively disclosed, why `a2a-sdk` is pinned to 1.1.2, the two ways callers reach the agent, how MCP servers plug in, and how the scheduler and A2A server share one process. |
-| [`00-architecture.md`](docs/design/00-architecture.md) | The input side: the data sources, why the wiki is a toolset rather than an agent, and how scheduled vs. user-triggered runs get different clearance through different principals. |
-| [`01-config.md`](docs/design/01-config.md) | The env-driven config layer: pointing it at an internal LLM gateway, and at your MCP servers. |
-| [`02-package-management.md`](docs/design/02-package-management.md) | Why uv over pip, and where dev dependencies live. |
+[**`docs/design/DESIGN.md`**](docs/design/DESIGN.md) is the design doc — one
+current-state reference covering the execution framework, the four choices
+that make it good at research, the data sources and their authorization
+model, config, A2A serving, scheduling, and the known limitations.
+[`02-package-management.md`](docs/design/02-package-management.md) covers why
+uv over pip.
 [`docs/RUNBOOK.md`](docs/RUNBOOK.md) is the operational doc — every command to
 run this locally and a step-by-step manual end-to-end verification pass (the
 kind that actually calls the model, unlike the test suite below).
@@ -95,11 +93,11 @@ if it needs auth) — see `.env.example`. Nothing connects anywhere unless you
 do. One caveat worth reading before you point it at anything sensitive: the
 triggering user's identity is **not** forwarded to the MCP server, so every
 call arrives as the same service account. `docs/RUNBOOK.md` §3.7 has the
-verification steps and the full caveat.
+verification steps; `DESIGN.md` §5.5 has the full caveat.
 
 To add your own **skill** (a rubric the agent must follow every run): drop
 `.claude/skills/<name>/SKILL.md` in and add the name to `DEFAULT_SKILLS` in
-`src/skr_agent/report/agent.py`. RUNBOOK §3.8.
+`src/skr_agent/report/agent.py`. RUNBOOK §3.8, `DESIGN.md` §3.3.
 
 The test suite needs no credentials at all.
 
@@ -128,7 +126,7 @@ curl http://localhost:8000/ \
 Scheduled and on-demand runs are the same agent with a different `Principal`
 (`skr_agent.principals`) — that difference is what makes a scheduled sweep see
 the executive roll-up while a user only ever sees their own division. See
-[`00-architecture.md`](docs/design/00-architecture.md) §4.
+[`DESIGN.md`](docs/design/DESIGN.md) §5.3.
 
 Each of the above needs real `LLM_API_KEY` credentials and calls the model —
 see [`docs/RUNBOOK.md`](docs/RUNBOOK.md) §3 for what to expect from each one
@@ -152,7 +150,7 @@ resolution, scheduler timing and failure isolation, and the A2A executor's
 principal resolution, streaming progress, task lifecycle and file artifacts —
 plus six integration tests driving a real HTTP round trip through the wired
 app, which is the layer that caught a bug the executor unit tests structurally
-could not (`03-agent-architecture-and-serving.md` §4.3).
+could not (`DESIGN.md` §7.3).
 
 The MCP tests run a real MCP server subprocess (`tests/mcp_fixture_server.py`)
 rather than mocking the client, since the contract with
@@ -166,7 +164,7 @@ scheduler firing. See design doc §7.
 
 ## Extending
 
-Adding a feature? Three questions, in order (`00-architecture.md` §9):
+Adding a feature? Three questions, in order (`DESIGN.md` §10):
 
 1. Does it need authorization? → write the rule in an `authz.py`, expose it as
    a tool. Don't default to wrapping an agent around it.

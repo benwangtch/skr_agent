@@ -17,7 +17,7 @@ server that gains a tool after startup will not be noticed until a restart.
 the caller's ``Principal`` and authorizes against it. MCP tools cannot: the
 credential is configured per connection (``MCP_TOKEN``), so from the server's
 side every call looks like the same service account no matter who triggered
-the run. That is a real gap, not an oversight — see ``docs/design/00`` §8. If
+the run. That is a real gap, not an oversight — see ``docs/design/DESIGN.md`` §5.5. If
 the MCP service enforces per-user rules, it needs the end user's token, and
 this module needs to grow a per-request client to carry it. Until then, only
 connect servers whose whole contents the *least* privileged caller of this
