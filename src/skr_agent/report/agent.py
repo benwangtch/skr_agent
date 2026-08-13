@@ -22,13 +22,13 @@ from typing import Any, Sequence
 
 from langchain_core.tools import BaseTool
 
-from ..protocol import AgentSpec
-from ..runtime import DeepAgent, ToolContext, ToolsetFactory
-from ..wiki.authz import WikiAuthorizer
-from ..wiki.backend import WikiBackend
-from ..wiki.tools import make_wiki_toolset
-from .sources import BomSource, NewsFeed
-from .tools import make_bom_toolset, make_news_toolset
+from skr_agent.protocol import AgentSpec
+from skr_agent.runtime import DeepAgent, ToolContext, ToolsetFactory
+from skr_agent.wiki.authz import WikiAuthorizer
+from skr_agent.wiki.backend import WikiBackend
+from skr_agent.wiki.tools import make_wiki_toolset
+from skr_agent.report.sources import BomSource, NewsFeed
+from skr_agent.report.tools import make_bom_toolset, make_news_toolset
 
 __all__ = ["build_skr_agent", "SYSTEM_PROMPT", "AGENT_NAME"]
 

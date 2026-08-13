@@ -222,3 +222,27 @@ class TestAddingYourOwnSkill:
 
         with pytest.raises(FileNotFoundError):
             load_skill(tmp_path, "no-such-skill")
+
+
+class TestImportStyle:
+    """Imports inside the package are absolute (`from skr_agent.x import y`).
+
+    A convention with no check drifts back within a few commits, and the
+    failure is silent — a relative import works fine until someone moves the
+    module. This keeps it honest.
+    """
+
+    def test_no_relative_imports_in_the_package(self):
+        import re
+
+        src = ROOT / "src"
+        relative = re.compile(r"^\s*from \.", re.M)
+        offenders = [
+            str(f.relative_to(ROOT))
+            for f in src.rglob("*.py")
+            if relative.search(f.read_text())
+        ]
+        assert offenders == [], (
+            "relative imports found; this package uses absolute imports "
+            f"(from skr_agent.…): {offenders}"
+        )

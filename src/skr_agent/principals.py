@@ -18,8 +18,8 @@ to be a better answer.
 
 from __future__ import annotations
 
-from .protocol import Principal
-from .wiki.authz import EXEC_NAMESPACE
+from skr_agent.protocol import Principal
+from skr_agent.wiki.authz import EXEC_NAMESPACE
 
 __all__ = ["service_principal", "user_principal", "EXEC_NAMESPACE"]
 

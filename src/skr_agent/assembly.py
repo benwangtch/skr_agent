@@ -11,10 +11,10 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Sequence
 
-from .mesh import AgentRegistry
-from .report import FixtureBom, FixtureNewsFeed, build_skr_agent
-from .runtime import DeepAgent, ToolsetFactory
-from .wiki import InMemoryWikiBackend, WikiAuthorizer, WikiBackend, WikiCoordinator
+from skr_agent.mesh import AgentRegistry
+from skr_agent.report import FixtureBom, FixtureNewsFeed, build_skr_agent
+from skr_agent.runtime import DeepAgent, ToolsetFactory
+from skr_agent.wiki import InMemoryWikiBackend, WikiAuthorizer, WikiBackend, WikiCoordinator
 
 __all__ = ["Mesh", "build_mesh"]
 

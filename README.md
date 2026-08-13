@@ -131,7 +131,7 @@ scheduler survive running together).
 ## Test
 
 ```bash
-uv run pytest              # 158 tests, no credentials required
+uv run pytest              # 159 tests, no credentials required
 ```
 
 Coverage: namespace authorization, clearance-gated namespaces, the
@@ -167,6 +167,10 @@ Adding a feature? Three questions, in order (`00-architecture.md` §9):
 3. Will it be called by more than one kind of principal (user / scheduled /
    third party)? → decide their grants explicitly now, the way
    `principals.py` does — don't assume the same input implies the same output.
+
+Imports inside the package are **absolute** (`from skr_agent.wiki.authz import
+WikiAuthorizer`), never relative. A test enforces it — see
+`tests/test_wiring.py::TestImportStyle`.
 
 Adding an IO service (a database, another storage backend, ...)? Copy
 `config/db.py`'s shape: one file, one class inheriting `BaseConfig`, one

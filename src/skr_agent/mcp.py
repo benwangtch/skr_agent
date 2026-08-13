@@ -36,10 +36,10 @@ from typing import Any, Sequence
 
 from langchain_core.tools import BaseTool, StructuredTool
 
-from .config import get_mcp
-from .config.mcp import MCP
-from .protocol import Citation
-from .runtime import ToolBundle, ToolContext, ToolsetFactory
+from skr_agent.config import get_mcp
+from skr_agent.config.mcp import MCP
+from skr_agent.protocol import Citation
+from skr_agent.runtime import ToolBundle, ToolContext, ToolsetFactory
 
 log = logging.getLogger(__name__)
 

@@ -90,9 +90,9 @@ from a2a.utils import TransportProtocol
 from fastapi import FastAPI
 from google.protobuf.json_format import MessageToDict
 
-from ..mesh import AgentRegistry
-from ..protocol import AgentRequest, AgentResponse, Authorizer, Denied, Principal
-from ..runtime import DeepAgent
+from skr_agent.mesh import AgentRegistry
+from skr_agent.protocol import AgentRequest, AgentResponse, Authorizer, Denied, Principal
+from skr_agent.runtime import DeepAgent
 
 log = logging.getLogger(__name__)
 

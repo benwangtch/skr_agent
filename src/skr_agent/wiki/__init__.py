@@ -1,7 +1,7 @@
-from .authz import EXEC_NAMESPACE, SHARED_NAMESPACE, WikiAuthorizer
-from .backend import InMemoryWikiBackend, RawReport, WikiBackend, WikiPage
-from .coordinator import WikiCoordinator
-from .tools import WIKI_TOOL_NAMES, make_wiki_toolset
+from skr_agent.wiki.authz import EXEC_NAMESPACE, SHARED_NAMESPACE, WikiAuthorizer
+from skr_agent.wiki.backend import InMemoryWikiBackend, RawReport, WikiBackend, WikiPage
+from skr_agent.wiki.coordinator import WikiCoordinator
+from skr_agent.wiki.tools import WIKI_TOOL_NAMES, make_wiki_toolset
 
 __all__ = [
     "SHARED_NAMESPACE",

@@ -12,11 +12,11 @@ moves to the real company environment.
 
 from __future__ import annotations
 
-from .base import BaseConfig
-from .db import DB, get_db
-from .llm import LLM, get_llm
-from .mcp import MCP, get_mcp
-from .minio import Minio, get_minio
+from skr_agent.config.base import BaseConfig
+from skr_agent.config.db import DB, get_db
+from skr_agent.config.llm import LLM, get_llm
+from skr_agent.config.mcp import MCP, get_mcp
+from skr_agent.config.minio import Minio, get_minio
 
 __all__ = [
     "BaseConfig",

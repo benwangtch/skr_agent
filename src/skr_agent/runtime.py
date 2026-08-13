@@ -35,8 +35,8 @@ from typing import Any, AsyncIterator, Callable, Iterable, Sequence
 from langchain_core.messages import AIMessage, BaseMessage, ToolMessage
 from langchain_core.tools import BaseTool
 
-from .config import get_llm
-from .protocol import (
+from skr_agent.config import get_llm
+from skr_agent.protocol import (
     AgentRequest,
     AgentResponse,
     AgentSpec,

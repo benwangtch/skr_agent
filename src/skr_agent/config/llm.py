@@ -22,7 +22,7 @@ from typing import TYPE_CHECKING, Literal
 from pydantic import SecretStr, model_validator
 from pydantic_settings import SettingsConfigDict
 
-from .base import BaseConfig
+from skr_agent.config.base import BaseConfig
 
 if TYPE_CHECKING:
     from langchain_core.language_models import BaseChatModel

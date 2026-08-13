@@ -1,9 +1,9 @@
 """skr-agent: a deep research agent on LangChain deepagents."""
 
-from .assembly import Mesh, build_mesh
-from .mesh import AgentRegistry, agent_as_tool, agents_as_tools
-from .principals import service_principal, user_principal
-from .protocol import (
+from skr_agent.assembly import Mesh, build_mesh
+from skr_agent.mesh import AgentRegistry, agent_as_tool, agents_as_tools
+from skr_agent.principals import service_principal, user_principal
+from skr_agent.protocol import (
     AgentError,
     AgentRequest,
     AgentResponse,
@@ -14,7 +14,7 @@ from .protocol import (
     Principal,
     Usage,
 )
-from .runtime import DeepAgent, ToolContext
+from skr_agent.runtime import DeepAgent, ToolContext
 
 __all__ = [
     "Mesh",

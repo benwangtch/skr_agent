@@ -19,10 +19,10 @@ from typing import Any
 
 from langchain_core.tools import BaseTool, StructuredTool
 
-from ..protocol import Citation, Denied
-from ..runtime import ToolBundle, ToolContext
-from .authz import WikiAuthorizer
-from .backend import WikiBackend, WikiPage
+from skr_agent.protocol import Citation, Denied
+from skr_agent.runtime import ToolBundle, ToolContext
+from skr_agent.wiki.authz import WikiAuthorizer
+from skr_agent.wiki.backend import WikiBackend, WikiPage
 
 log = logging.getLogger(__name__)
 

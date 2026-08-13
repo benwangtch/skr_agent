@@ -14,7 +14,7 @@ from functools import lru_cache
 from pydantic import SecretStr
 from pydantic_settings import SettingsConfigDict
 
-from .base import BaseConfig
+from skr_agent.config.base import BaseConfig
 
 __all__ = ["DB", "get_db"]
 

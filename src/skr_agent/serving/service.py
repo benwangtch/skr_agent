@@ -16,12 +16,12 @@ from pathlib import Path
 
 import uvicorn
 
-from ..assembly import build_mesh
-from ..mcp import mcp_toolset_from_config
-from ..principals import service_principal
-from ..protocol import Budget
-from .a2a import build_a2a_app
-from .scheduler import ScheduledJob, Scheduler
+from skr_agent.assembly import build_mesh
+from skr_agent.mcp import mcp_toolset_from_config
+from skr_agent.principals import service_principal
+from skr_agent.protocol import Budget
+from skr_agent.serving.a2a import build_a2a_app
+from skr_agent.serving.scheduler import ScheduledJob, Scheduler
 
 log = logging.getLogger(__name__)
 

@@ -27,7 +27,7 @@ from typing import Any, Literal
 from pydantic import SecretStr
 from pydantic_settings import SettingsConfigDict
 
-from .base import BaseConfig
+from skr_agent.config.base import BaseConfig
 
 log = logging.getLogger(__name__)
 
