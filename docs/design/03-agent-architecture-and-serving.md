@@ -15,6 +15,7 @@ skr agent 是一個 deep research agent：它接開放式問題，自己決定�
 |---|---|---|
 | 執行框架用什麼？ | **LangChain `deepagents`**（LangGraph 之上的 deep agent harness） | 內建 planning/todo、context 摘要、subagent 委派、virtual filesystem，這些自己寫都要錢——見 §2 |
 | 模型怎麼選？ | LangChain `BaseChatModel`，由 `config/llm.py` 建 | 換成 LangChain 之後不再綁特定 wire protocol，內部 gateway 只要有 OpenAI-compatible endpoint 就能接——見 §2.2 |
+| 怎麼讓它擅長 deep research？ | scratchpad 筆記 + 發布前 fact-checker + 停止條件 + 矛盾攤開 | 框架只給 loop 和委派，研究品質是這四個決定堆出來的——見 §2.4 |
 | Skill（報告規範）怎麼載入？ | **直接 inline 進 system prompt**，不用 `create_deep_agent(skills=...)` | 那個參數是 progressive disclosure（模型自己決定要不要 `read_file` 去讀），對「每次都必須遵守的規範」是錯的取捨——見 §2.3 |
 | 外部怎麼呼叫 skr agent？ | 兩種機制，依「是否跨 process」二選一 | 同 process 用 `agent_as_tool`；跨 process 用 A2A——見 §3 |
 | A2A SDK 用哪個版本？ | **`a2a-sdk` 1.1.2**（釘死；1.1.2 是最新的 1.x，沒有 1.2/1.3） | 這個套件 API 變動很兇，0.3.x→1.x 是大改名 + 換 protobuf 型別——見 §4.1 |
@@ -109,6 +110,49 @@ provider = "anthropic"   # → ChatAnthropic
 `.claude/skills/incident-report/SKILL.md`（報告格式 + 嚴重度分級規則）是 skr agent **每次跑都必須遵守**的規範，不是「碰巧有用就查」的參考資料。所以 `runtime.py::load_skill()` 直接把檔案內容讀出來（去掉 YAML frontmatter，那是給 catalog 用的 metadata，inline 進 prompt 只是浪費 token）接到 system prompt 後面，模型必定看得到。
 
 **這不代表 `skills=` 是錯的設計**——等到 skill 有十幾二十個、大部分情況下只有一兩個相關時，progressive disclosure 才是對的取捨（不然每次都把全部規範塞進 prompt）。現在只有一份、而且是必要的，所以 inline 是對的。這個判斷會隨 skill 數量改變，寫在這裡是為了之後有人要加第二、第三個 skill 時知道界線在哪。
+
+### 2.4 讓它真的擅長 deep research 的四個設計
+
+框架給的是 agent loop、planning、context 摘要、subagent 委派。**「做得好的 deep research」不是框架送的，是這幾個具體決定堆出來的**——這一節記錄現在做了哪些、以及為什麼。
+
+**1. Scratchpad：investigator 寫檔案，lead 讀檔案。**
+
+一次掃 20 家公司，如果每個 investigator 都把完整發現塞回 lead 的對話裡，lead 的 context 會先爆掉、然後被 `SummarizationMiddleware` 壓縮——**壓縮掉的通常正是 citation 這種結構化細節**，而那是這份報告唯一的價值。
+
+所以改成：investigator 把完整發現寫進 `/findings/<company_id>.md`，回覆只給一句摘要 + 檔案路徑；lead 用 `read_file` 從檔案彙整。
+
+這能成立的前提是 **虛擬檔案系統在 agent 跟 subagent 之間是雙向共用的**——這點實測過（subagent 寫的檔案會出現在 parent 的 state 裡，`_EXCLUDED_STATE_KEYS` 只排除 `todos`/`messages`/`structured_response`，不含 `files`），不是照文件假設的。
+
+順帶澄清一個之前寫得不精確的地方：`company-investigator` 「建構上唯讀」指的是**對 wiki 唯讀**（拿不到 `wiki_write_page`，那才是有授權意義的邊界）。它對虛擬檔案系統一直都有寫入權——`deepagents` 不管你 `tools` 給什麼，都會給每個 subagent 一份 `FilesystemMiddleware`。現在這件事從「順便有」變成「刻意用」。
+
+**2. 發布前一定要過 `fact-checker`。**
+
+Deep research 最常見的失敗不是查不到，是**寫出一句看起來很合理、但沒有任何來源真的這樣說的話**。所以加了一個唯讀的 `fact-checker` subagent：拿到草稿跟它宣稱的來源，逐條判 Supported / Overstated / Unsupported / Contradicted，最後給 PASS 或 REVISE。
+
+兩個刻意的限制：
+
+- **不給它任何 search tool。** 一個能自己去找新資料的 checker 會變成在做研究而不是在查核，而且它「確認」的可能是報告根本沒引用的來源——那不是被驗證的東西。它只有 `fetch_article` / `wiki_read_page` / `get_bom_company`，用來重讀已經被引用的來源。
+- **prompt 明講不准用「刪掉 citation」來消 REVISE**——沒有來源的宣稱，正確處理是拿掉那句話或去找到來源，不是拿掉那個讓檢查觸發的引用。
+
+代價很實在：每份報告多一次 model pass。這是拿 token 換可稽核性，對一份會被高層看到的報告值得。
+
+**3. 明確的停止條件。**
+
+「什麼時候算查完了」如果不寫，模型會在兩個方向失敗：抓到第一個看起來對的答案就收工，或者一直挖不知道停。所以 prompt 在草擬前插了一個檢查點：範圍內哪些公司沒有 finding 檔案（那是缺口，不是乾淨）、哪些宣稱只有單一來源、什麼資訊會改變嚴重度判斷。
+
+寫成「回答這幾題，一兩行，然後開始寫」——**是檢查不是儀式**，沒缺就說沒缺然後往下走。
+
+**4. 矛盾要攤開，不是默默選一邊。**
+
+外部新聞跟內部記錄對不上的時候，模型的預設行為是安靜地挑一個比較順的寫進去。但**那個矛盾本身通常才是整份報告最有價值的東西**。prompt 現在要求兩邊都寫、兩邊都附來源、並說明自己比較相信哪一個以及為什麼。
+
+### 還沒做的（依價值排序）
+
+1. **查詢改寫只寫在 prompt 裡，沒有結構化。** investigator 被要求輪過法人名/別名/母公司/料號/事件詞，但沒有東西保證它真的跑完——一個「查詢覆蓋率」的檢查會比 prompt 指示可靠。
+2. **深度不隨 tier 變。** `critical` 供應商跟 `standard` 供應商目前花一樣的力氣。budget-aware depth 應該讓前者挖更深。
+3. **來源品質/時效沒有權重。** 嚴重度分級有 rubric，但「這個來源可不可信、是不是三年前的」沒有。
+
+---
 
 ---
 

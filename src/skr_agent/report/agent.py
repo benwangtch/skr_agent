@@ -37,6 +37,15 @@ AGENT_NAME = "skr_agent"
 DEFAULT_SKILLS = ("incident-report",)
 """Skill directories under ``.claude/skills/`` inlined into the prompt."""
 
+FINDINGS_DIR = "/findings"
+"""Where investigators write their notes, and where the lead reads them from.
+
+The virtual filesystem is shared between an agent and its subagents in both
+directions (verified: a subagent's writes land in the parent's state), which
+is what lets a wide sweep hand back detail without pushing it through the
+parent's context window.
+"""
+
 INVESTIGATOR_TOOLS = (
     "get_bom_company",
     "search_news",
@@ -44,6 +53,20 @@ INVESTIGATOR_TOOLS = (
     "wiki_search",
     "wiki_read_page",
 )
+"""Data-source tools the investigator gets. Filesystem tools are NOT listed
+here and do not need to be: ``deepagents`` gives every subagent its own
+``FilesystemMiddleware`` regardless of this list. So "read-only" here means
+read-only with respect to the *wiki* — the boundary that carries authorization
+— not with respect to the scratchpad, which the investigator is meant to
+write to."""
+
+VERIFIER_TOOLS = (
+    "fetch_article",
+    "wiki_read_page",
+    "get_bom_company",
+)
+"""The fact-checker re-reads primary sources. It gets no search tools: its job
+is to check the claims in front of it, not to go find new ones."""
 
 
 SYSTEM_PROMPT = """\
@@ -69,9 +92,13 @@ your todo list to track a multi-company sweep so nothing is silently dropped.
 
 When a sweep covers several companies, delegate them to `company-investigator`
 subagents via the `task` tool — launch them in a single message so they run
-concurrently — and synthesise their findings yourself. Investigate directly,
-without delegating, when the task concerns one company or a handful of
-lookups.
+concurrently. Each one writes its detail to `/findings/<company_id>.md` and
+replies with a short summary. **Read those files with `read_file` when you
+synthesise.** Their replies are pointers, not the evidence; the file has the
+sources you need to cite. Use `ls` on `/findings` to see what came back.
+
+Investigate directly, without delegating, when the task concerns one company
+or a handful of lookups.
 
 Your access to any source is scoped to whoever triggered this run. If a search
 returns nothing, that may mean the record exists somewhere you cannot read —
@@ -93,6 +120,36 @@ report.
 - Attach a source to every factual claim. If you cannot source it, drop it.
 - Report faithfully: if you could not check something, say so plainly rather
   than implying coverage you do not have.
+- **When two sources disagree, say so.** Do not quietly pick the one that
+  reads better. An external report and our internal record contradicting each
+  other is usually the most valuable thing in the report, not an
+  inconvenience to smooth over — give both, with both sources, and say which
+  you find more credible and why.
+
+# Before you write: are you actually done?
+
+Deep research fails in two directions — stopping at the first plausible
+answer, and digging forever. Check yourself explicitly before drafting:
+
+- Which companies in scope have no finding file? Those are gaps, not
+  clean results. Either investigate them or list them under Coverage.
+- Which claims rest on exactly one source? Either corroborate them or mark
+  them as single-sourced in the report.
+- What would change your severity call if you learned it? If that is cheap
+  to check, check it.
+
+State the answers in one or two lines, then draft. If nothing is missing, say
+so and move on — this is a check, not a ritual.
+
+# Verify before publishing
+
+Once the report is drafted and before you publish it, hand it to the
+`fact-checker` subagent along with the sources it rests on. It re-reads the
+primary sources and returns a verdict per claim.
+
+If it comes back REVISE, fix what it flagged and re-check. Do not publish over
+an unresolved REVISE, and do not resolve one by deleting the claim's citation
+— the fix for an unsupported claim is to drop the claim or find its source.
 
 # Publishing
 
@@ -129,11 +186,51 @@ Work the problem in this order, and do not stop at the first search:
    and read in full anything that looks relevant. Prior context frequently
    changes the severity.
 
-Report back with: whether you found anything, each incident with its date,
-source URL and a one-line summary, any internal context, and your severity
-call with the reasoning behind it. If you found nothing, say "no external
-signal found" explicitly and list the queries you tried, so the caller knows
-how much ground you actually covered.
+Vary your queries deliberately. A single phrasing finds a single slice of
+what is out there, so work through: the legal name, each alias, the parent or
+brand name, the component part numbers we buy, and incident words (recall,
+outage, fire, strike, sanction, insolvency, breach). Stop when new queries
+stop returning new material, not when the first one returns something.
+
+# Write your findings to a file
+
+Before you reply, write everything you found to `/findings/<company_id>.md`.
+Include every source URL, the internal pages you read, the queries you ran,
+and your severity reasoning — the long version, not a summary.
+
+Then reply with a SHORT summary: severity, the one-line reason, and the file
+path you wrote. The file is the record; your reply is the pointer. This is
+what keeps a twenty-company sweep from overflowing the lead agent's context.
+
+If you found nothing, still write the file, and say "no external signal found"
+explicitly in both the file and your reply, listing the queries you tried, so
+the caller can tell "checked, clean" from "not checked".
+"""
+
+
+VERIFIER_PROMPT = """You are a fact-checker. You are given a draft report and the sources it
+claims to rest on. You do not write reports and you do not do new research.
+
+For each factual claim in the draft, decide which of these it is:
+
+- **Supported** — a cited source, read in full, actually says this.
+- **Overstated** — the source says something weaker, narrower, or less
+  certain than the draft does. This is the most common failure and the one
+  you exist to catch.
+- **Unsupported** — no cited source says it. Includes claims where a source
+  is cited but does not contain the fact.
+- **Contradicted** — a source says the opposite.
+
+Re-read the sources. `fetch_article` and `wiki_read_page` are how you check;
+do not judge from the draft's own summary of a source, which is exactly the
+thing under test.
+
+Reply with a list: the claim, the verdict, and for anything not `Supported`,
+what the source actually says. Finish with an overall verdict of PASS (every
+claim supported) or REVISE (anything else).
+
+Be specific and be hard to please. A vague "looks fine" from you is worse
+than useless, because it will be trusted.
 """
 
 
@@ -177,10 +274,25 @@ def build_skr_agent(
                 # tool": a tool added later is excluded until someone names it
                 # here. That is why MCP tools do not reach the investigator --
                 # nothing tells us which of them mutate state, and this
-                # subagent is meant to be read-only by construction. Name one
-                # here to opt it in once you know it is safe.
+                # subagent must not be able to publish. Name one here to opt
+                # it in once you know it is safe.
                 "tools": [tools[n] for n in INVESTIGATOR_TOOLS if n in tools],
-            }
+            },
+            {
+                "name": "fact-checker",
+                "description": (
+                    "Checks a drafted report's claims against the sources it "
+                    "cites and returns PASS or REVISE with per-claim verdicts. "
+                    "Run this after drafting and before publishing. It does no "
+                    "new research."
+                ),
+                "system_prompt": VERIFIER_PROMPT,
+                # Deliberately no search tools: a checker that can go find new
+                # material tends to start researching instead of checking, and
+                # a claim it "confirms" from a source the report never cited is
+                # not the thing being verified.
+                "tools": [tools[n] for n in VERIFIER_TOOLS if n in tools],
+            },
         ]
 
     return DeepAgent(

@@ -21,7 +21,7 @@ fixtures/                              4 家公司、5 頁 wiki（namespace: sup
 examples/
   run_report.py                        單次執行 skr agent（掃描或單一提問）
   run_service.py                       同時跑 A2A server + 排程
-tests/                                 159 個測試，6 個檔案，全部不需要金鑰
+tests/                                 167 個測試，6 個檔案，全部不需要金鑰
 ```
 
 ---
@@ -55,7 +55,7 @@ uv run python -c "from skr_agent.config import get_llm; l=get_llm(); print(l.pro
 ## 2. 跑單元測試（不花錢、不用金鑰）
 
 ```bash
-uv run pytest              # 159 個測試，約 3 秒
+uv run pytest              # 167 個測試，約 3 秒
 uv run pytest -q tests/test_wiki_authz.py     # 只跑某個檔案
 uv run pytest -k aggregation                  # 只跑名字符合的測試
 ```
@@ -64,7 +64,7 @@ uv run pytest -k aggregation                  # 只跑名字符合的測試
 |---|---|
 | `test_wiki_authz.py`（32） | namespace 授權、clearance-gated namespace、aggregation leak 檢查 |
 | `test_mesh.py`（15） | agent-as-tool 的 principal 綁定、citation 傳遞、拒絕處理 |
-| `test_wiring.py`（22） | 每個 agent 的 tool 清單、subagent 拿不到 write tool、報告規範真的進 prompt、import 風格（絕對 import） |
+| `test_wiring.py`（30） | 每個 agent 的 tool 清單、沒有 subagent 能發布、fact-checker 沒有 search tool、scratchpad/停止條件/矛盾處理有進 prompt、import 風格 |
 | `test_config.py`（22） | LLM config 的 provider 預設值、env var 覆蓋、chat model 建構 |
 | `test_scheduler.py`（19） | cron 排程時序、job 失敗互不影響、hook 觸發 |
 | `test_mcp.py`（17） | MCP 設定解析、連不上時的降級、對真的 MCP server 載 tool／呼叫／記 citation |
@@ -84,7 +84,8 @@ uv run pytest -k aggregation                  # 只跑名字符合的測試
 uv run python examples/run_report.py --dry-run --tier critical
 ```
 
-預期看到：
+預期看到（`-v` 開 log 更清楚）：
+- **委派 → 寫檔 → 讀檔 → 查核 → 發布**這條鏈：lead 呼叫 `task`（company-investigator），investigator 呼叫 `write_file` 寫 `/findings/<company>.md`，lead 用 `read_file` 讀回來，然後呼叫 `task`（fact-checker），最後才 `wiki_write_page`
 - `Acme Semiconductor Ltd`（fixtures 裡唯一 tier=critical 的兩家之一）被掃到、且有找到新聞事件（fixtures 裡真的有一篇火災新聞）
 - 輸出最後有 `--- citations ---` 區塊，列出至少一個 `external_url`（新聞）和一個 `wiki_page`/`raw_report`（因為 agent 應該會去 wiki 交叉比對既有記錄）
 - 因為 `--dry-run`，不會真的寫 wiki，最後不會印 `wiki namespaces now: ...`
@@ -312,7 +313,7 @@ print('prompt 長度:', len(p))
 - A2A server 跟排程可以在同一個 process 穩定跑，外部呼叫走得通（3.6）
 - （若有設定）MCP tool 載得到、模型會用、而且留下 `mcp://` citation（3.7）
 
-這六步涵蓋了 `docs/design/03-agent-architecture-and-serving.md` §8 列出的「已知限制」之外的核心行為。**沒有自動化的 e2e 測試**（§2 的 159 個測試都用 stub，不叫真的模型）——這是刻意的，因為每次 CI 跑都花 token、還會因為模型輸出的隨機性讓測試不穩定。真要把 §3 這幾步自動化，做法是寫一支跑在 CI 之外（例如手動觸發或排程跑一次）的 smoke test script，判準改成寬鬆的（例如「有沒有 citations」而不是「內容逐字符合」）——這份文件目前先提供人工跑過一遍的步驟，還沒做那支腳本。
+這六步涵蓋了 `docs/design/03-agent-architecture-and-serving.md` §8 列出的「已知限制」之外的核心行為。**沒有自動化的 e2e 測試**（§2 的 167 個測試都用 stub，不叫真的模型）——這是刻意的，因為每次 CI 跑都花 token、還會因為模型輸出的隨機性讓測試不穩定。真要把 §3 這幾步自動化，做法是寫一支跑在 CI 之外（例如手動觸發或排程跑一次）的 smoke test script，判準改成寬鬆的（例如「有沒有 citations」而不是「內容逐字符合」）——這份文件目前先提供人工跑過一遍的步驟，還沒做那支腳本。
 
 ## 5. 常見卡住的地方
 

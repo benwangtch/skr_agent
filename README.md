@@ -6,6 +6,13 @@ supply-chain questions, decides for itself how deep to dig, cross-references
 several data sources, and publishes a sourced report. It is servable over
 **A2A** (with streaming) and runnable on a **cron-like schedule**.
 
+Research quality comes from four deliberate choices, not from the framework:
+investigators write findings to a shared scratchpad so a wide sweep does not
+blow up the lead's context, a read-only `fact-checker` re-reads primary
+sources and must return PASS before anything publishes, an explicit stopping
+check runs before drafting, and contradictions between sources get surfaced
+rather than silently resolved. See design doc §2.4.
+
 Its data sources are peers: the **bill of materials**, **external news**, the
 **internal wiki**, and any **MCP servers** you point it at. The wiki gets its
 own module only because it is the one source with an authorization model to
@@ -46,7 +53,8 @@ src/skr_agent/
     coordinator.py     optional LLM synthesis layer over the same tools (opt-in, off by default)
   report/
     sources.py / tools.py   BOM + news data sources and their tools
-    agent.py          ★ skr agent itself: prompt, sources, subagent, rubric
+    agent.py          ★ skr agent itself: prompt, sources, subagents, rubric
+                        (company-investigator + fact-checker)
   serving/
     a2a.py            ★ serve any DeepAgent as a streaming A2A server
     scheduler.py       ★ cron-like recurring runs
@@ -131,7 +139,7 @@ scheduler survive running together).
 ## Test
 
 ```bash
-uv run pytest              # 159 tests, no credentials required
+uv run pytest              # 167 tests, no credentials required
 ```
 
 Coverage: namespace authorization, clearance-gated namespaces, the

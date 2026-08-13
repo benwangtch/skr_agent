@@ -30,6 +30,10 @@ def mesh_with_wiki_agent():
     return build_mesh(fixtures=ROOT / "fixtures", project_root=ROOT, with_wiki_agent=True)
 
 
+def by_name(subagents):
+    return {s["name"]: s for s in subagents}
+
+
 def surface(agent, principal=ALICE, budget=None):
     """The tool names and subagent specs one request would actually get."""
     request = AgentRequest(
@@ -84,15 +88,64 @@ class TestSkrAgentWiring:
 
     def test_subagent_tools_are_a_subset_of_the_parent_surface(self, mesh):
         names, subagents, _ = surface(mesh.report_agent)
-        investigator = subagents[0]
-        assert {t.name for t in investigator["tools"]} <= names
+        for sub in subagents:
+            assert {t.name for t in sub["tools"]} <= names, sub["name"]
 
-    def test_subagent_cannot_write(self, mesh):
-        """Only the top-level agent publishes; investigators are read-only."""
+    def test_no_subagent_can_publish(self, mesh):
+        """Only the top-level agent publishes."""
         _, subagents, _ = surface(mesh.report_agent)
-        sub_tools = {t.name for t in subagents[0]["tools"]}
-        assert "wiki_write_page" not in sub_tools
-        assert "wiki_search" in sub_tools
+        for sub in subagents:
+            assert "wiki_write_page" not in {t.name for t in sub["tools"]}, sub["name"]
+
+    def test_the_investigator_can_still_research(self, mesh):
+        _, subagents, _ = surface(mesh.report_agent)
+        investigator = by_name(subagents)["company-investigator"]
+        assert {"wiki_search", "search_news"} <= {t.name for t in investigator["tools"]}
+
+
+class TestDeepResearchStructure:
+    """The parts that make this a research agent rather than a lookup: a
+    verification pass, notes on a scratchpad, and an explicit stopping check."""
+
+    def test_a_fact_checker_subagent_exists(self, mesh):
+        _, subagents, _ = surface(mesh.report_agent)
+        assert "fact-checker" in by_name(subagents)
+
+    def test_the_fact_checker_cannot_search(self, mesh):
+        """A checker that can go find new material starts researching instead
+        of checking, and 'confirms' claims from sources the report never
+        cited."""
+        _, subagents, _ = surface(mesh.report_agent)
+        checker_tools = {t.name for t in by_name(subagents)["fact-checker"]["tools"]}
+        assert "search_news" not in checker_tools
+        assert "wiki_search" not in checker_tools
+        # It can still re-read a cited source, which is the whole job.
+        assert {"fetch_article", "wiki_read_page"} <= checker_tools
+
+    def test_the_lead_is_told_to_verify_before_publishing(self, mesh):
+        prompt = mesh.report_agent._full_system_prompt()
+        assert "fact-checker" in prompt
+        assert "REVISE" in prompt
+
+    def test_the_lead_is_told_to_read_the_findings_files(self, mesh):
+        """The scratchpad only helps if the lead synthesises from the files
+        rather than from the subagents' short replies."""
+        prompt = mesh.report_agent._full_system_prompt()
+        assert "read_file" in prompt
+        assert "/findings/" in prompt
+
+    def test_the_investigator_is_told_to_write_its_findings_file(self):
+        from skr_agent.report.agent import INVESTIGATOR_PROMPT
+
+        assert "/findings/" in INVESTIGATOR_PROMPT
+
+    def test_the_lead_has_an_explicit_stopping_check(self, mesh):
+        prompt = mesh.report_agent._full_system_prompt()
+        assert "single source" in prompt or "one source" in prompt
+
+    def test_contradictions_must_be_surfaced_not_resolved_silently(self, mesh):
+        prompt = mesh.report_agent._full_system_prompt()
+        assert "disagree" in prompt
 
 
 class TestBudgetPropagation:
