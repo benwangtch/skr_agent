@@ -22,8 +22,8 @@ enforce.
 current-state reference covering the execution framework, the four choices
 that make it good at research, the data sources and their authorization
 model, config, A2A serving, scheduling, and the known limitations.
-[`02-package-management.md`](docs/design/02-package-management.md) covers why
-uv over pip.
+[`package-management.md`](docs/design/package-management.md) covers why uv
+over pip.
 [`docs/RUNBOOK.md`](docs/RUNBOOK.md) is the operational doc — every command to
 run this locally and a step-by-step manual end-to-end verification pass (the
 kind that actually calls the model, unlike the test suite below).

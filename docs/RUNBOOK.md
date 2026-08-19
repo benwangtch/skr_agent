@@ -13,15 +13,16 @@ src/deep_research_agent/
   protocol.py, mesh.py, runtime.py     契約層 + agent-as-tool + deepagents 執行殼
   principals.py                        service_principal() vs user_principal()
   assembly.py                          build_mesh() —— 組裝整個系統的唯一入口
-  config/                              env-driven 設定（llm.py 有真的接上；db.py / minio.py 是佔位）
-  wiki/                                三個資料來源之一，唯一有授權模型的那個
+  mcp.py                               外部 MCP server 當資料來源（預設關閉）
+  config/                              env-driven 設定（llm.py / mcp.py 有接上；db.py / minio.py 是佔位）
+  wiki/                                四個資料來源之一，唯一有授權模型的那個
   report/                              agent 本體 + BOM/news 資料來源
   serving/                             A2A server（streaming）+ cron-like scheduler
 fixtures/                              4 家公司、5 頁 wiki（namespace: supply / platform / shared）、4 份原始週報
 examples/
   run_report.py                        單次執行 agent（掃描或單一提問）
   run_service.py                       同時跑 A2A server + 排程
-tests/                                 167 個測試，6 個檔案，全部不需要金鑰
+tests/                                 167 個測試，7 個檔案，全部不需要金鑰
 ```
 
 ---

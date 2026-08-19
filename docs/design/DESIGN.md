@@ -3,9 +3,9 @@
 狀態：實作完成，對應現行程式碼
 範圍：整個 `src/deep_research_agent/`
 
-這份文件描述系統**現在的樣子**。它取代了先前的 `00-architecture.md`、`01-config.md`、`03-agent-architecture-and-serving.md`——那三份是不同時間點寫的，各自帶著「上一版我判斷錯了」的修訂記錄，疊在一起之後同一件事有三個地方講、而且開始互相矛盾。演進過程在 git log 裡，這裡只講結論。
+這份文件描述系統**現在的樣子**，是唯一一份架構參考。先前有三份按時間累積、彼此重疊又開始互相矛盾的設計文件，已經合併進這裡並刪除。演進過程在 git log 裡，這裡只講結論。
 
-操作手冊（怎麼跑、怎麼驗證）在 [`../RUNBOOK.md`](../RUNBOOK.md)。套件管理在 [`02-package-management.md`](02-package-management.md)。
+操作手冊（怎麼跑、怎麼驗證）在 [`../RUNBOOK.md`](../RUNBOOK.md)。套件管理在 [`package-management.md`](package-management.md)。
 
 ---
 
