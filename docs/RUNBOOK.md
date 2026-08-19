@@ -22,7 +22,7 @@ fixtures/                              4 家公司、5 頁 wiki（namespace: sup
 examples/
   run_report.py                        單次執行 agent（掃描或單一提問）
   run_service.py                       同時跑 A2A server + 排程
-tests/                                 171 個測試，7 個檔案，全部不需要金鑰
+tests/                                 179 個測試，7 個檔案，全部不需要金鑰
 ```
 
 ---
@@ -56,7 +56,7 @@ uv run python -c "from deep_research_agent.config import get_llm; l=get_llm(); p
 ## 2. 跑單元測試（不花錢、不用金鑰）
 
 ```bash
-uv run pytest              # 171 個測試，約 3 秒
+uv run pytest              # 179 個測試，約 3 秒
 uv run pytest -q tests/test_wiki_authz.py     # 只跑某個檔案
 uv run pytest -k aggregation                  # 只跑名字符合的測試
 ```
@@ -65,7 +65,7 @@ uv run pytest -k aggregation                  # 只跑名字符合的測試
 |---|---|
 | `test_wiki_authz.py`（32） | namespace 授權、clearance-gated namespace、aggregation leak 檢查 |
 | `test_mesh.py`（15） | agent-as-tool 的 principal 綁定、citation 傳遞、拒絕處理 |
-| `test_wiring.py`（34） | 每個 agent 的 tool 清單、沒有 subagent 能發布、fact-checker 沒有 search tool、scratchpad/停止條件/矛盾處理有進 prompt、import 風格 |
+| `test_wiring.py`（42） | 每個 agent 的 tool 清單、沒有 subagent 能發布、fact-checker 沒有 search tool、scratchpad/停止條件/矛盾處理有進 prompt、import 風格 |
 | `test_config.py`（22） | LLM config 的 provider 預設值、env var 覆蓋、chat model 建構 |
 | `test_scheduler.py`（19） | cron 排程時序、job 失敗互不影響、hook 觸發 |
 | `test_mcp.py`（17） | MCP 設定解析、連不上時的降級、對真的 MCP server 載 tool／呼叫／記 citation |
@@ -272,14 +272,44 @@ uv run python examples/run_report.py --ask "<一個需要用到你 MCP tool 的�
 
 ## 3.8 放進你自己的 skill
 
-Skill 是「報告格式、判準」這類**每次跑都必須遵守**的規範。加一個新的：
+Skill 是「報告格式、判準、寫作風格」這類**每次跑都必須遵守**的規範。三種放法，選一種：
+
+### A. 你維護的 skill 在別的地方（推薦）
+
+不要複製進來——複製品跟原始檔遲早會不一致，而且沒人會發現。用 `SKILLS_PATH` 指過去：
+
+```bash
+# .env
+SKILLS_PATH=/opt/shared-skills        # 這個目錄「裝著」各個 skill 目錄
+SKILLS_ENABLED=house-style            # 也就是 /opt/shared-skills/house-style/SKILL.md
+```
+
+不用改任何一行程式碼。`SKILLS_ENABLED` 是**附加**到預設清單，不是取代——所以內建的 `incident-report` 規範不會被你不小心關掉。
+
+多個目錄用 `:` 分隔（跟 `PATH` 一樣），左邊優先。**同名時 `SKILLS_PATH` 會蓋過 repo 內建的**，所以要改寫內建 rubric 也不用動這個 repo。
+
+### B. 直接寫路徑
+
+臨時試一份 skill，不想設環境變數：
+
+```python
+build_deep_research_agent(..., skills=["incident-report", "/abs/path/to/house-style"])
+```
+
+名字裡有 `/` 或結尾是 `.md` 就當成路徑直接讀，不走搜尋路徑。
+
+### C. 放進這個 repo
+
+這份 skill 就是屬於這個 repo 的（例如它跟這裡的 tool 名稱綁死）：
 
 ```bash
 mkdir -p .claude/skills/your-skill
 $EDITOR .claude/skills/your-skill/SKILL.md
 ```
 
-`SKILL.md` 的格式（YAML frontmatter + markdown 本文）：
+然後把名字加進 `src/deep_research_agent/report/agent.py` 的 `DEFAULT_SKILLS`。
+
+### SKILL.md 長什麼樣
 
 ```markdown
 ---
@@ -292,27 +322,26 @@ description: 一句話講這個 skill 管什麼
 實際的規範內容。
 ```
 
-然後在 `src/deep_research_agent/report/agent.py` 的 `DEFAULT_SKILLS` 加上名字：
+**frontmatter 會被丟掉，只有本文進 prompt**——frontmatter 是給 skill catalog 用的 metadata，inline 進去只是浪費 token。
 
-```python
-DEFAULT_SKILLS = ("incident-report", "your-skill")
-```
-
-驗證它真的進到 prompt（不花錢）：
+### 驗證它真的被載入（不花錢）
 
 ```bash
 uv run python -c "
-from pathlib import Path; from deep_research_agent import build_mesh
+from deep_research_agent import build_mesh
 m = build_mesh(fixtures='fixtures', project_root='.')
+print('loaded:', m.report_agent.skills)
 p = m.report_agent._full_system_prompt()
-print('your-skill 在 prompt 裡:', 'your-skill' in p)
-print('prompt 長度:', len(p))
+print('your text in prompt:', '你 skill 裡的某一句' in p)
+print('prompt chars:', len(p))
 "
 ```
 
-**frontmatter 會被丟掉，只有本文進 prompt**——frontmatter 是給 skill catalog 用的 metadata，inline 進 prompt 只是浪費 token。
+找不到的時候會直接 raise，訊息裡列出**每一個找過的路徑**——不會安靜地跳過。一份「每次都要遵守」的規範如果沒載到卻不出聲，只從輸出很難查。
 
-**這些 skill 是整份塞進 system prompt 的，不是 progressive disclosure**（理由見 design doc §2.3：必須遵守的規範不該靠模型自己記得去讀檔）。代價是每一份 skill 的全文都佔 context——**skill 多到十幾份、而且大部分情況只有一兩份相關的時候，這個取捨就該翻轉**，改用 `create_deep_agent(skills=...)` 的按需載入。目前一兩份的規模，inline 是對的。
+### 什麼時候該改用按需載入
+
+這些 skill 是**整份塞進 system prompt** 的（理由見 `DESIGN.md` §3.3）。代價是每份的全文都佔 context。**大約十份、而且多數情況只有一兩份相關的時候，這個取捨就該翻轉**，改用 `create_deep_agent(skills=...)` 的 progressive disclosure。現在一兩份，inline 是對的。
 
 ---
 
@@ -328,7 +357,7 @@ print('prompt 長度:', len(p))
 - A2A server 跟排程可以在同一個 process 穩定跑，外部呼叫走得通（3.6）
 - （若有設定）MCP tool 載得到、模型會用、而且留下 `mcp://` citation（3.7）
 
-這六步涵蓋了 `docs/design/DESIGN.md` §9 列出的「已知限制」之外的核心行為。**沒有自動化的 e2e 測試**（§2 的 171 個測試都用 stub，不叫真的模型）——這是刻意的，因為每次 CI 跑都花 token、還會因為模型輸出的隨機性讓測試不穩定。真要把 §3 這幾步自動化，做法是寫一支跑在 CI 之外（例如手動觸發或排程跑一次）的 smoke test script，判準改成寬鬆的（例如「有沒有 citations」而不是「內容逐字符合」）——這份文件目前先提供人工跑過一遍的步驟，還沒做那支腳本。
+這六步涵蓋了 `docs/design/DESIGN.md` §9 列出的「已知限制」之外的核心行為。**沒有自動化的 e2e 測試**（§2 的 179 個測試都用 stub，不叫真的模型）——這是刻意的，因為每次 CI 跑都花 token、還會因為模型輸出的隨機性讓測試不穩定。真要把 §3 這幾步自動化，做法是寫一支跑在 CI 之外（例如手動觸發或排程跑一次）的 smoke test script，判準改成寬鬆的（例如「有沒有 citations」而不是「內容逐字符合」）——這份文件目前先提供人工跑過一遍的步驟，還沒做那支腳本。
 
 ## 5. 常見卡住的地方
 

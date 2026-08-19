@@ -79,7 +79,13 @@ serving/        怎麼被外部觸發到。
 
 **這不代表 `skills=` 是錯的設計。** 等 skill 有十幾二十份、大部分情況只有一兩份相關時，按需載入才是對的取捨。**界線大約在十份**——現在一份，inline 是對的。加第三、第四份 skill 的人請重新評估。
 
-加一份 skill：建 `.claude/skills/<name>/SKILL.md`，名字加進 `report/agent.py` 的 `DEFAULT_SKILLS`。
+加一份 skill 有三條路（操作細節見 RUNBOOK §3.8）：
+
+- **你自己維護、放在別處**：`SKILLS_PATH` 指到裝著它的目錄，`SKILLS_ENABLED` 寫名字。不改程式碼，也不留一份會跟原始檔不一致的複製品。同名時 `SKILLS_PATH` 蓋過內建的。
+- **直接給路徑**：`skills=["incident-report", "/abs/path/to/x"]`，名字含 `/` 或結尾 `.md` 就當路徑讀。
+- **屬於這個 repo**：建 `.claude/skills/<name>/SKILL.md`，名字加進 `DEFAULT_SKILLS`。
+
+`SKILLS_ENABLED` 是附加不是取代——一個能安靜關掉報告 rubric 的環境變數是個陷阱。找不到 skill 會 raise 並列出每個找過的路徑，不會安靜跳過。
 
 ---
 
@@ -315,10 +321,10 @@ await asyncio.gather(
 ## 8. 測試策略
 
 ```
-171 個測試，全部不需要金鑰、不呼叫模型
+179 個測試，全部不需要金鑰、不呼叫模型
   test_wiki_authz.py  32   namespace 授權、clearance、aggregation leak
   test_a2a_server.py  32   executor 生命週期 + 6 個走真 handler/HTTP 的整合測試
-  test_wiring.py      34   tool 清單、subagent 邊界、deep research 結構、報告取回、import 風格
+  test_wiring.py      42   tool 清單、subagent 邊界、deep research 結構、報告取回、skill 載入、import 風格
   test_config.py      22   provider 預設、env 覆蓋、chat model 形狀
   test_scheduler.py   19   cron 時序、失敗隔離
   test_mcp.py         17   設定解析、降級、對真的 MCP server 載入/呼叫/citation

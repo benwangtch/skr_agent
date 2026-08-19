@@ -95,9 +95,11 @@ triggering user's identity is **not** forwarded to the MCP server, so every
 call arrives as the same service account. `docs/RUNBOOK.md` §3.7 has the
 verification steps; `DESIGN.md` §5.5 has the full caveat.
 
-To add your own **skill** (a rubric the agent must follow every run): drop
-`.claude/skills/<name>/SKILL.md` in and add the name to `DEFAULT_SKILLS` in
-`src/deep_research_agent/report/agent.py`. RUNBOOK §3.8, `DESIGN.md` §3.3.
+To add a **skill** (a rubric the agent must follow every run): if you
+maintain it elsewhere, point `SKILLS_PATH` at the directory holding it and
+name it in `SKILLS_ENABLED` — no code change, and no copy to drift from the
+original. If it belongs to this repo, drop `.claude/skills/<name>/SKILL.md` in
+and add the name to `DEFAULT_SKILLS`. RUNBOOK §3.8, `DESIGN.md` §3.3.
 
 The test suite needs no credentials at all.
 
@@ -137,7 +139,7 @@ scheduler survive running together).
 ## Test
 
 ```bash
-uv run pytest              # 171 tests, no credentials required
+uv run pytest              # 179 tests, no credentials required
 ```
 
 Coverage: namespace authorization, clearance-gated namespaces, the

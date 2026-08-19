@@ -346,3 +346,99 @@ class TestRetrievingThePublishedReport:
 
     def test_get_returns_none_for_an_unknown_ref(self, mesh):
         assert mesh.backend.get("supply/no-such-page") is None
+
+
+class TestLoadingASkillYouMaintain:
+    """A skill you maintain usually lives outside this repo. Copying it in
+    works until the copy and the original disagree, so names resolve across a
+    search path and paths resolve literally."""
+
+    @pytest.fixture
+    def external(self, tmp_path):
+        d = tmp_path / "skills" / "house-style"
+        d.mkdir(parents=True)
+        (d / "SKILL.md").write_text(
+            "---\nname: house-style\ndescription: how we write\n---\n\n"
+            "# House style\n\nLead with the exposure.\n",
+            encoding="utf-8",
+        )
+        return tmp_path / "skills"
+
+    def test_a_directory_path_resolves_literally(self, external):
+        from deep_research_agent.runtime import load_skill
+
+        assert "Lead with the exposure." in load_skill(".", str(external / "house-style"))
+
+    def test_a_skill_md_path_resolves_literally(self, external):
+        from deep_research_agent.runtime import load_skill
+
+        body = load_skill(".", str(external / "house-style" / "SKILL.md"))
+        assert "Lead with the exposure." in body
+
+    def test_frontmatter_is_stripped_from_an_external_skill(self, external):
+        from deep_research_agent.runtime import load_skill
+
+        body = load_skill(".", str(external / "house-style"))
+        assert "description: how we write" not in body
+        assert body.startswith("#")
+
+    def test_skills_path_makes_a_name_resolvable(self, external, monkeypatch):
+        from deep_research_agent.config import reset_settings_cache
+        from deep_research_agent.runtime import load_skill
+
+        monkeypatch.setenv("SKILLS_PATH", str(external))
+        reset_settings_cache()
+        try:
+            assert "Lead with the exposure." in load_skill(".", "house-style")
+        finally:
+            reset_settings_cache()
+
+    def test_skills_path_shadows_a_built_in_of_the_same_name(self, tmp_path, monkeypatch):
+        """Override a built-in rubric without editing the repo's copy."""
+        from deep_research_agent.config import reset_settings_cache
+        from deep_research_agent.runtime import load_skill
+
+        d = tmp_path / "incident-report"
+        d.mkdir()
+        (d / "SKILL.md").write_text("# OVERRIDDEN", encoding="utf-8")
+        monkeypatch.setenv("SKILLS_PATH", str(tmp_path))
+        reset_settings_cache()
+        try:
+            assert load_skill(ROOT, "incident-report") == "# OVERRIDDEN"
+        finally:
+            reset_settings_cache()
+
+    def test_skills_enabled_adds_without_replacing_the_default(self, external, monkeypatch):
+        """An env var that could silently drop the report rubric would be a
+        footgun -- SKILLS_ENABLED is additive."""
+        from deep_research_agent.config import reset_settings_cache
+
+        monkeypatch.setenv("SKILLS_PATH", str(external))
+        monkeypatch.setenv("SKILLS_ENABLED", "house-style")
+        reset_settings_cache()
+        try:
+            mesh = build_mesh(fixtures=ROOT / "fixtures", project_root=ROOT)
+            assert mesh.report_agent.skills == ["incident-report", "house-style"]
+            prompt = mesh.report_agent._full_system_prompt()
+            assert "Lead with the exposure." in prompt
+            assert "Severity rubric" in prompt
+        finally:
+            reset_settings_cache()
+
+    def test_a_name_listed_twice_is_not_loaded_twice(self, monkeypatch):
+        from deep_research_agent.config import reset_settings_cache
+
+        monkeypatch.setenv("SKILLS_ENABLED", "incident-report")
+        reset_settings_cache()
+        try:
+            mesh = build_mesh(fixtures=ROOT / "fixtures", project_root=ROOT)
+            assert mesh.report_agent.skills == ["incident-report"]
+        finally:
+            reset_settings_cache()
+
+    def test_a_missing_skill_names_every_path_it_tried(self, tmp_path):
+        from deep_research_agent.runtime import load_skill
+
+        with pytest.raises(FileNotFoundError) as exc:
+            load_skill(tmp_path, "no-such-skill")
+        assert ".claude/skills/no-such-skill/SKILL.md" in str(exc.value)

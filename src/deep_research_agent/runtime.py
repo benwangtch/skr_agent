@@ -124,20 +124,48 @@ def _message_text(message: BaseMessage) -> str:
     return "".join(parts)
 
 
-def load_skill(root: str | Path, name: str) -> str:
-    """Read one ``.claude/skills/<name>/SKILL.md`` body, minus its frontmatter.
+def skill_candidates(root: str | Path, name: str) -> list[Path]:
+    """Every place ``name`` could resolve to, in priority order.
 
-    The YAML frontmatter is metadata for a skill *catalog*; inlining it into a
+    A name containing a separator, or ending in ``.md``, is treated as a path
+    the caller means literally — that is how you point at a skill you maintain
+    outside this repo without copying it in. Everything else is looked up by
+    name across ``SKILLS_PATH`` first, then the repo's own
+    ``.claude/skills``, so a shared skill can shadow a built-in one.
+    """
+    if name.endswith(".md") or "/" in name or "\\" in name:
+        p = Path(name).expanduser()
+        return [p if p.suffix == ".md" else p / "SKILL.md"]
+
+    from deep_research_agent.config import get_skills
+
+    roots = [*get_skills().search_paths(), Path(root) / ".claude" / "skills"]
+    return [r / name / "SKILL.md" for r in roots]
+
+
+def load_skill(root: str | Path, name: str) -> str:
+    """Read one skill's body, minus its YAML frontmatter.
+
+    The frontmatter is metadata for a skill *catalog*; inlining it into a
     prompt would just spend tokens telling the model a description of
     instructions that are already right there.
+
+    Raises ``FileNotFoundError`` naming every path tried. A skill that is
+    meant to be followed on every run and silently is not would be a very
+    expensive thing to debug from the output alone.
     """
-    path = Path(root) / ".claude" / "skills" / name / "SKILL.md"
-    text = path.read_text(encoding="utf-8")
-    if text.startswith("---"):
-        end = text.find("\n---", 3)
-        if end != -1:
-            text = text[end + 4 :]
-    return text.strip()
+    candidates = skill_candidates(root, name)
+    for path in candidates:
+        if path.is_file():
+            text = path.read_text(encoding="utf-8")
+            if text.startswith("---"):
+                end = text.find("\n---", 3)
+                if end != -1:
+                    text = text[end + 4 :]
+            return text.strip()
+
+    tried = "\n  ".join(str(c) for c in candidates)
+    raise FileNotFoundError(f"skill {name!r} not found. Looked in:\n  {tried}")
 
 
 class DeepAgent:

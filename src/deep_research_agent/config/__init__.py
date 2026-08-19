@@ -17,6 +17,7 @@ from deep_research_agent.config.db import DB, get_db
 from deep_research_agent.config.llm import LLM, get_llm
 from deep_research_agent.config.mcp import MCP, get_mcp
 from deep_research_agent.config.minio import Minio, get_minio
+from deep_research_agent.config.skills import Skills, get_skills
 
 __all__ = [
     "BaseConfig",
@@ -26,6 +27,8 @@ __all__ = [
     "get_db",
     "MCP",
     "get_mcp",
+    "Skills",
+    "get_skills",
     "Minio",
     "get_minio",
     "reset_settings_cache",
@@ -42,4 +45,5 @@ def reset_settings_cache() -> None:
     get_llm.cache_clear()
     get_db.cache_clear()
     get_mcp.cache_clear()
+    get_skills.cache_clear()
     get_minio.cache_clear()

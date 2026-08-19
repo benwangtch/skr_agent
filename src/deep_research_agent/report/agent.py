@@ -35,7 +35,18 @@ __all__ = ["build_deep_research_agent", "SYSTEM_PROMPT", "AGENT_NAME"]
 AGENT_NAME = "deep_research_agent"
 
 DEFAULT_SKILLS = ("incident-report",)
-"""Skill directories under ``.claude/skills/`` inlined into the prompt."""
+"""Skills inlined into the prompt. ``SKILLS_ENABLED`` adds to this."""
+
+
+def _env_skills(already: list[str]) -> list[str]:
+    """Skills named by ``SKILLS_ENABLED``, minus any already requested.
+
+    Additive rather than replacing: the report rubric is what makes the output
+    publishable, so an env var that could silently drop it is a footgun.
+    """
+    from deep_research_agent.config import get_skills
+
+    return [n for n in get_skills().enabled_names() if n not in already]
 
 FINDINGS_DIR = "/findings"
 """Where investigators write their notes, and where the lead reads them from.
@@ -248,10 +259,11 @@ def build_deep_research_agent(
 ) -> DeepAgent:
     """Wire up the research agent with its sources, subagents, and report rubric.
 
-    ``skills`` names directories under ``.claude/skills/``; each one's
-    ``SKILL.md`` body is inlined into the system prompt (see ``runtime.py`` for
-    why inlined rather than progressively disclosed). Add a skill by dropping
-    the directory in and naming it here.
+    ``skills`` names the skills to inline into the system prompt (see
+    ``runtime.py`` for why inlined rather than progressively disclosed). A name
+    resolves across ``SKILLS_PATH`` and then this repo's ``.claude/skills/``;
+    a path resolves literally. Anything in ``SKILLS_ENABLED`` is appended, so
+    a deployment can add a skill it maintains elsewhere without editing code.
 
     ``extra_toolsets`` adds data sources beyond the three built in — MCP
     servers arrive this way (``deep_research_agent.mcp``).
@@ -311,7 +323,7 @@ def build_deep_research_agent(
             *extra_toolsets,
         ],
         subagents=subagents,
-        skills=list(skills),
+        skills=list(skills) + _env_skills(list(skills)),
         project_root=project_root,
         model=model,
         max_turns=max_turns,
