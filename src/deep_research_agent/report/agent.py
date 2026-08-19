@@ -17,6 +17,7 @@ service account sees across divisions, a user sees their own. See
 
 from __future__ import annotations
 
+import logging
 from pathlib import Path
 from typing import Any, Sequence
 
@@ -32,10 +33,32 @@ from deep_research_agent.report.tools import make_bom_toolset, make_news_toolset
 
 __all__ = ["build_deep_research_agent", "SYSTEM_PROMPT", "AGENT_NAME"]
 
+log = logging.getLogger(__name__)
+
 AGENT_NAME = "deep_research_agent"
 
 DEFAULT_SKILLS = ("incident-report",)
 """Skills inlined into the prompt. ``SKILLS_ENABLED`` adds to this."""
+
+
+def _warn_about_unloaded_skills(project_root, loaded: list[str]) -> None:
+    """Point out skills sitting in the repo that nothing is loading.
+
+    The failure mode of a folder-based convention is a file that looks
+    installed and silently is not: someone adds ``skills/house-style/`` for a
+    scheduled job, never wires it up, and the job keeps running to the old
+    rules with no signal. A warning is the cheapest way to close that gap
+    without making every dropped-in folder mandatory policy.
+    """
+    from deep_research_agent.runtime import discover_skills
+
+    unloaded = sorted(set(discover_skills(project_root)) - set(loaded))
+    if unloaded:
+        log.warning(
+            "skills present but not loaded: %s. Add to DEFAULT_SKILLS "
+            "(report/agent.py) or SKILLS_ENABLED to use them.",
+            ", ".join(unloaded),
+        )
 
 
 def _env_skills(already: list[str]) -> list[str]:
@@ -261,13 +284,16 @@ def build_deep_research_agent(
 
     ``skills`` names the skills to inline into the system prompt (see
     ``runtime.py`` for why inlined rather than progressively disclosed). A name
-    resolves across ``SKILLS_PATH`` and then this repo's ``.claude/skills/``;
+    resolves across ``SKILLS_PATH`` and then this repo's ``skills/``;
     a path resolves literally. Anything in ``SKILLS_ENABLED`` is appended, so
     a deployment can add a skill it maintains elsewhere without editing code.
 
     ``extra_toolsets`` adds data sources beyond the three built in — MCP
     servers arrive this way (``deep_research_agent.mcp``).
     """
+
+    resolved_skills = list(skills) + _env_skills(list(skills))
+    _warn_about_unloaded_skills(project_root, resolved_skills)
 
     def subagents(ctx: ToolContext, tools: dict[str, BaseTool]) -> list[dict[str, Any]]:
         # Read-only by construction: the investigator is handed a subset that
@@ -323,7 +349,7 @@ def build_deep_research_agent(
             *extra_toolsets,
         ],
         subagents=subagents,
-        skills=list(skills) + _env_skills(list(skills)),
+        skills=resolved_skills,
         project_root=project_root,
         model=model,
         max_turns=max_turns,

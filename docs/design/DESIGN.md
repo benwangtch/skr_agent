@@ -75,7 +75,7 @@ serving/        怎麼被外部觸發到。
 
 `create_deep_agent(skills=...)` 的載入機制是 **progressive disclosure**：prompt 裡只放 skill 的名字和描述，模型自己判斷要不要 `read_file` 去讀本文。
 
-`.claude/skills/incident-report/SKILL.md`（報告格式 + 嚴重度分級）是**每次跑都必須遵守**的規範，不是「碰巧有用就查」的參考。所以 `runtime.py::load_skill()` 直接讀檔（去掉 YAML frontmatter，那是給 catalog 用的 metadata）接到 system prompt 後面。
+`skills/incident-report/SKILL.md`（報告格式 + 嚴重度分級）是**每次跑都必須遵守**的規範，不是「碰巧有用就查」的參考。所以 `runtime.py::load_skill()` 直接讀檔（去掉 YAML frontmatter，那是給 catalog 用的 metadata）接到 system prompt 後面。
 
 **這不代表 `skills=` 是錯的設計。** 等 skill 有十幾二十份、大部分情況只有一兩份相關時，按需載入才是對的取捨。**界線大約在十份**——現在一份，inline 是對的。加第三、第四份 skill 的人請重新評估。
 
@@ -83,7 +83,11 @@ serving/        怎麼被外部觸發到。
 
 - **你自己維護、放在別處**：`SKILLS_PATH` 指到裝著它的目錄，`SKILLS_ENABLED` 寫名字。不改程式碼，也不留一份會跟原始檔不一致的複製品。同名時 `SKILLS_PATH` 蓋過內建的。
 - **直接給路徑**：`skills=["incident-report", "/abs/path/to/x"]`，名字含 `/` 或結尾 `.md` 就當路徑讀。
-- **屬於這個 repo**：建 `.claude/skills/<name>/SKILL.md`，名字加進 `DEFAULT_SKILLS`。
+- **屬於這個 repo（排程用的走這條）**：建 `skills/<name>/SKILL.md`，名字加進 `DEFAULT_SKILLS`。排程是無人看管的，規範必須跟程式碼一起版控、一起 review，否則 job 的行為可能在沒有任何 commit 的情況下改變。
+
+skill 資料夾是 `skills/`（不是 `.claude/skills/`——那是這個專案還跑在 Claude Agent SDK 上時的殘留，現在仍然找得到但不是主要位置）。一個排程 job 依賴的規範是**版控的商業邏輯**，藏在以工具命名的隱藏目錄裡就不會有人 review 它。
+
+放進資料夾但沒有被載入的 skill，`build_deep_research_agent` 會 log 一行 warning 點名它——資料夾慣例的失敗模式就是「看起來裝好了，其實沒有」。
 
 `SKILLS_ENABLED` 是附加不是取代——一個能安靜關掉報告 rubric 的環境變數是個陷阱。找不到 skill 會 raise 並列出每個找過的路徑，不會安靜跳過。
 
@@ -321,10 +325,10 @@ await asyncio.gather(
 ## 8. 測試策略
 
 ```
-179 個測試，全部不需要金鑰、不呼叫模型
+187 個測試，全部不需要金鑰、不呼叫模型
   test_wiki_authz.py  32   namespace 授權、clearance、aggregation leak
   test_a2a_server.py  32   executor 生命週期 + 6 個走真 handler/HTTP 的整合測試
-  test_wiring.py      42   tool 清單、subagent 邊界、deep research 結構、報告取回、skill 載入、import 風格
+  test_wiring.py      50   tool 清單、subagent 邊界、deep research 結構、報告取回、skill 載入、import 風格
   test_config.py      22   provider 預設、env 覆蓋、chat model 形狀
   test_scheduler.py   19   cron 時序、失敗隔離
   test_mcp.py         17   設定解析、降級、對真的 MCP server 載入/呼叫/citation

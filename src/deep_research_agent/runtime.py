@@ -131,16 +131,56 @@ def skill_candidates(root: str | Path, name: str) -> list[Path]:
     the caller means literally — that is how you point at a skill you maintain
     outside this repo without copying it in. Everything else is looked up by
     name across ``SKILLS_PATH`` first, then the repo's own
-    ``.claude/skills``, so a shared skill can shadow a built-in one.
+    ``skills/``, so a shared skill can shadow a built-in one.
     """
     if name.endswith(".md") or "/" in name or "\\" in name:
         p = Path(name).expanduser()
         return [p if p.suffix == ".md" else p / "SKILL.md"]
 
+    return [r / name / "SKILL.md" for r in skill_roots(root)]
+
+
+REPO_SKILL_DIRS = ("skills", ".claude/skills")
+"""Skill folders inside the repo, in priority order.
+
+``skills/`` is the real home: a rubric a scheduled job depends on is versioned
+business logic, and burying that in a hidden directory named after whichever
+tool happened to build the repo is how it stops getting reviewed.
+``.claude/skills`` still resolves, because it is where this project started
+and where Claude Code looks if anyone uses it on this repo.
+"""
+
+
+def skill_roots(root: str | Path) -> list[Path]:
+    """Every directory searched for skills, in priority order.
+
+    Configured paths come first so a deployment can override a shipped skill;
+    the repo's own folders come last so a checkout always works with no
+    configuration at all — which is what a scheduled job needs.
+    """
     from deep_research_agent.config import get_skills
 
-    roots = [*get_skills().search_paths(), Path(root) / ".claude" / "skills"]
-    return [r / name / "SKILL.md" for r in roots]
+    return [*get_skills().search_paths(), *(Path(root) / d for d in REPO_SKILL_DIRS)]
+
+
+def discover_skills(root: str | Path) -> dict[str, Path]:
+    """Every skill that exists on disk, by name, first root wins.
+
+    This is how the agent knows what is *available* as opposed to what it was
+    told to load. ``build_deep_research_agent`` uses it to point out a skill
+    sitting in the repo that nothing is loading — the failure mode of a
+    folder-based convention is a file that looks installed and silently is
+    not.
+    """
+    found: dict[str, Path] = {}
+    for r in skill_roots(root):
+        if not r.is_dir():
+            continue
+        for child in sorted(r.iterdir()):
+            manifest = child / "SKILL.md"
+            if child.is_dir() and manifest.is_file() and child.name not in found:
+                found[child.name] = manifest
+    return found
 
 
 def load_skill(root: str | Path, name: str) -> str:

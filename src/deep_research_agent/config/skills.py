@@ -9,7 +9,8 @@ original disagree, and then nobody notices for a month.
 So skills resolve across a search path, newest-wins, in this order:
 
 1. every directory in ``SKILLS_PATH`` (colon-separated, leftmost first)
-2. ``<project_root>/.claude/skills`` — the built-in one
+2. ``<project_root>/skills`` — skills that ship with this repo
+3. ``<project_root>/.claude/skills`` — legacy location, still honoured
 
 and ``SKILLS_ENABLED`` adds names to what the agent loads without editing
 ``DEFAULT_SKILLS``. Both default to empty, so with nothing set the behavior is

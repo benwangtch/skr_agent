@@ -78,7 +78,7 @@ class TestDeepResearchAgentWiring:
         assert "source_refs" in prompt
 
     def test_skill_file_exists_where_the_loader_will_look(self, mesh):
-        assert (ROOT / ".claude" / "skills" / "incident-report" / "SKILL.md").is_file()
+        assert (ROOT / "skills" / "incident-report" / "SKILL.md").is_file()
 
     def test_load_skill_strips_frontmatter(self):
         body = load_skill(ROOT, "incident-report")
@@ -235,8 +235,8 @@ class TestStructuredOutputParsing:
 
 
 class TestAddingYourOwnSkill:
-    """Adding a skill is: create `.claude/skills/<name>/SKILL.md`, then name it
-    in `skills=`. These lock down that the second one is treated like the first
+    """Adding a skill is: create `skills/<name>/SKILL.md`, then name it in
+    `skills=`. These lock down that the second one is treated like the first
     -- inlined in full, not merely advertised."""
 
     def test_a_second_skill_is_inlined_too(self, tmp_path):
@@ -244,7 +244,7 @@ class TestAddingYourOwnSkill:
         from deep_research_agent.report.sources import FixtureBom, FixtureNewsFeed
         from deep_research_agent.wiki import InMemoryWikiBackend, WikiAuthorizer
 
-        skill_dir = tmp_path / ".claude" / "skills" / "house-style"
+        skill_dir = tmp_path / "skills" / "house-style"
         skill_dir.mkdir(parents=True)
         (skill_dir / "SKILL.md").write_text(
             "---\nname: house-style\ndescription: how we write\n---\n\n"
@@ -252,7 +252,7 @@ class TestAddingYourOwnSkill:
             encoding="utf-8",
         )
         # The built-in skill has to exist under the same root to be found.
-        builtin = tmp_path / ".claude" / "skills" / "incident-report"
+        builtin = tmp_path / "skills" / "incident-report"
         builtin.mkdir(parents=True)
         (builtin / "SKILL.md").write_text("# Rubric\n\nSeverity rubric here.\n", encoding="utf-8")
 
@@ -441,4 +441,80 @@ class TestLoadingASkillYouMaintain:
 
         with pytest.raises(FileNotFoundError) as exc:
             load_skill(tmp_path, "no-such-skill")
-        assert ".claude/skills/no-such-skill/SKILL.md" in str(exc.value)
+        assert "skills/no-such-skill/SKILL.md" in str(exc.value)
+
+
+class TestTheRepoSkillsFolder:
+    """A skill a scheduled job depends on belongs in the repo, versioned with
+    the code. These cover that the folder works with no configuration at all,
+    and that a skill dropped in but never wired up is visible rather than
+    silently ignored."""
+
+    def test_the_repo_folder_needs_no_configuration(self):
+        from deep_research_agent.runtime import skill_roots
+
+        roots = [str(r) for r in skill_roots(ROOT)]
+        assert str(ROOT / "skills") in roots
+
+    def test_the_legacy_claude_folder_still_resolves(self):
+        """Older checkouts and Claude Code both use .claude/skills."""
+        from deep_research_agent.runtime import skill_roots
+
+        assert str(ROOT / ".claude/skills") in [str(r) for r in skill_roots(ROOT)]
+
+    def test_the_repo_skill_is_discovered(self):
+        from deep_research_agent.runtime import discover_skills
+
+        assert "incident-report" in discover_skills(ROOT)
+
+    def test_discovery_finds_a_dropped_in_folder(self, tmp_path):
+        from deep_research_agent.runtime import discover_skills
+
+        d = tmp_path / "skills" / "house-style"
+        d.mkdir(parents=True)
+        (d / "SKILL.md").write_text("# House style", encoding="utf-8")
+        assert set(discover_skills(tmp_path)) == {"house-style"}
+
+    def test_a_directory_without_a_skill_md_is_not_a_skill(self, tmp_path):
+        from deep_research_agent.runtime import discover_skills
+
+        (tmp_path / "skills" / "notes").mkdir(parents=True)
+        assert discover_skills(tmp_path) == {}
+
+    def test_skills_beats_dot_claude_for_the_same_name(self, tmp_path):
+        """Both folders resolve; the visible one wins."""
+        from deep_research_agent.runtime import load_skill
+
+        for parent, body in (("skills", "# NEW"), (".claude/skills", "# OLD")):
+            d = tmp_path / parent / "dup"
+            d.mkdir(parents=True)
+            (d / "SKILL.md").write_text(body, encoding="utf-8")
+        assert load_skill(tmp_path, "dup") == "# NEW"
+
+    def test_an_unloaded_repo_skill_is_warned_about(self, tmp_path, caplog):
+        """The failure mode of a folder convention is a file that looks
+        installed and silently is not."""
+        import logging
+
+        from deep_research_agent.report.agent import _warn_about_unloaded_skills
+
+        d = tmp_path / "skills" / "house-style"
+        d.mkdir(parents=True)
+        (d / "SKILL.md").write_text("# House style", encoding="utf-8")
+
+        with caplog.at_level(logging.WARNING):
+            _warn_about_unloaded_skills(tmp_path, ["incident-report"])
+        assert "house-style" in caplog.text
+
+    def test_no_warning_when_everything_present_is_loaded(self, tmp_path, caplog):
+        import logging
+
+        from deep_research_agent.report.agent import _warn_about_unloaded_skills
+
+        d = tmp_path / "skills" / "house-style"
+        d.mkdir(parents=True)
+        (d / "SKILL.md").write_text("# House style", encoding="utf-8")
+
+        with caplog.at_level(logging.WARNING):
+            _warn_about_unloaded_skills(tmp_path, ["house-style"])
+        assert "not loaded" not in caplog.text

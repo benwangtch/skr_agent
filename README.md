@@ -57,7 +57,7 @@ src/deep_research_agent/
     a2a.py            ★ serve any DeepAgent as a streaming A2A server
     scheduler.py       ★ cron-like recurring runs
     service.py          runs both together in one process
-.claude/skills/incident-report/SKILL.md   report format + severity rubric
+skills/incident-report/SKILL.md   report format + severity rubric (drop new ones here)
 fixtures/          4 companies, 4 articles, 5 wiki pages, 4 raw weekly reports
 ```
 
@@ -98,7 +98,7 @@ verification steps; `DESIGN.md` §5.5 has the full caveat.
 To add a **skill** (a rubric the agent must follow every run): if you
 maintain it elsewhere, point `SKILLS_PATH` at the directory holding it and
 name it in `SKILLS_ENABLED` — no code change, and no copy to drift from the
-original. If it belongs to this repo, drop `.claude/skills/<name>/SKILL.md` in
+original. If it belongs to this repo, drop `skills/<name>/SKILL.md` in
 and add the name to `DEFAULT_SKILLS`. RUNBOOK §3.8, `DESIGN.md` §3.3.
 
 The test suite needs no credentials at all.
@@ -139,7 +139,7 @@ scheduler survive running together).
 ## Test
 
 ```bash
-uv run pytest              # 179 tests, no credentials required
+uv run pytest              # 187 tests, no credentials required
 ```
 
 Coverage: namespace authorization, clearance-gated namespaces, the
