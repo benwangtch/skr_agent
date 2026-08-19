@@ -22,7 +22,7 @@ fixtures/                              4 家公司、5 頁 wiki（namespace: sup
 examples/
   run_report.py                        單次執行 agent（掃描或單一提問）
   run_service.py                       同時跑 A2A server + 排程
-tests/                                 167 個測試，7 個檔案，全部不需要金鑰
+tests/                                 171 個測試，7 個檔案，全部不需要金鑰
 ```
 
 ---
@@ -56,7 +56,7 @@ uv run python -c "from deep_research_agent.config import get_llm; l=get_llm(); p
 ## 2. 跑單元測試（不花錢、不用金鑰）
 
 ```bash
-uv run pytest              # 167 個測試，約 3 秒
+uv run pytest              # 171 個測試，約 3 秒
 uv run pytest -q tests/test_wiki_authz.py     # 只跑某個檔案
 uv run pytest -k aggregation                  # 只跑名字符合的測試
 ```
@@ -65,7 +65,7 @@ uv run pytest -k aggregation                  # 只跑名字符合的測試
 |---|---|
 | `test_wiki_authz.py`（32） | namespace 授權、clearance-gated namespace、aggregation leak 檢查 |
 | `test_mesh.py`（15） | agent-as-tool 的 principal 綁定、citation 傳遞、拒絕處理 |
-| `test_wiring.py`（30） | 每個 agent 的 tool 清單、沒有 subagent 能發布、fact-checker 沒有 search tool、scratchpad/停止條件/矛盾處理有進 prompt、import 風格 |
+| `test_wiring.py`（34） | 每個 agent 的 tool 清單、沒有 subagent 能發布、fact-checker 沒有 search tool、scratchpad/停止條件/矛盾處理有進 prompt、import 風格 |
 | `test_config.py`（22） | LLM config 的 provider 預設值、env var 覆蓋、chat model 建構 |
 | `test_scheduler.py`（19） | cron 排程時序、job 失敗互不影響、hook 觸發 |
 | `test_mcp.py`（17） | MCP 設定解析、連不上時的降級、對真的 MCP server 載 tool／呼叫／記 citation |
@@ -93,23 +93,37 @@ uv run python examples/run_report.py --dry-run --tier critical
 
 若這步失敗（例如 `LLM_API_KEY` 沒填或 gateway 連不上），錯誤會是 provider client 的連線／認證訊息。注意 key 沒填的話會在**建立 agent 的當下**就報錯，不是跑到一半才失敗——這代表問題在 §1 的 config，不在後面的邏輯。
 
-### 3.2 使用者觸發：驗證權限範圍
+### 3.2 使用者觸發：產出一份報告並存檔
 
 ```bash
-uv run python examples/run_report.py --division supply --tier critical
+uv run python examples/run_report.py --division supply --tier critical --out example-report.md
 ```
 
-跟 3.1 的差別：這次不帶 `--dry-run`，agent 會真的呼叫 `wiki_write_page` 把報告發布出去。因為觸發者是 `user_principal("demo.user@supply", "supply", roles={wiki.reader, wiki.writer})`，報告應該被寫進 `supply` namespace（不是 `exec`）。跑完後確認：
+跟 3.1 的差別：沒有 `--dry-run`，agent 會真的呼叫 `wiki_write_page` 發布。觸發者是 `user_principal("demo.user@supply", "supply", roles={wiki.reader, wiki.writer})`，所以報告會寫進 `supply` namespace（不是 `exec`）。
+
+**`--out` 是拿到報告的方式。** agent 最後那句話是刻意寫短的摘要——**報告本體是它發布的那一頁 wiki**，而這個 demo 的 wiki 是記憶體版的，process 結束就沒了。`--out` 把那一頁存成 markdown；不加的話一樣會印在畫面上，只是關掉終端機就找不回來了。
+
+預期輸出的最後會有：
 
 ```
-wiki namespaces now: platform, shared, supply
+=== published report (supply/incident-report-2026-NN) ===
+
+# Supply chain incident report — week NN, 2026
+## Summary
+...
+**Sources:** https://..., rpt-supply-2026-W28
+
+(written to example-report.md)
 ```
 
-（這是印出 fixture 裡目前所有 namespace，`supply` 本來就有頁面，看不出新頁面是否真的寫入——想確認真的寫進去了，用 `-v` 開 log，會看到 `wiki.write page=supply/incident-report-... subject=demo.user@supply` 這行。）
+檢查這幾件事（對照 `.claude/skills/incident-report/SKILL.md` 的規範）：
 
-```bash
-uv run python examples/run_report.py --division supply --tier critical -v 2>&1 | grep "wiki.write"
-```
+- **每個 Findings 條目都有 Sources**，而且來源是真的被讀過的（3.1 的 citations 區塊可以對照）
+- **`none` 有被當成一種發現**，附上跑過哪些 query，而不是整段消失
+- **有 Coverage 段落**說明掃了什麼、沒掃什麼
+- namespace 是 `supply`——用 `-v` 看 log 裡的 `wiki.write` 那行確認
+
+沒有任何頁面被發布時會印一行提示，要用 `-v` 去看是 agent 自己決定不發、還是寫入被權限擋下。
 
 ### 3.3 驗證權限真的有擋：唯讀使用者不能發布
 
@@ -314,7 +328,7 @@ print('prompt 長度:', len(p))
 - A2A server 跟排程可以在同一個 process 穩定跑，外部呼叫走得通（3.6）
 - （若有設定）MCP tool 載得到、模型會用、而且留下 `mcp://` citation（3.7）
 
-這六步涵蓋了 `docs/design/DESIGN.md` §9 列出的「已知限制」之外的核心行為。**沒有自動化的 e2e 測試**（§2 的 167 個測試都用 stub，不叫真的模型）——這是刻意的，因為每次 CI 跑都花 token、還會因為模型輸出的隨機性讓測試不穩定。真要把 §3 這幾步自動化，做法是寫一支跑在 CI 之外（例如手動觸發或排程跑一次）的 smoke test script，判準改成寬鬆的（例如「有沒有 citations」而不是「內容逐字符合」）——這份文件目前先提供人工跑過一遍的步驟，還沒做那支腳本。
+這六步涵蓋了 `docs/design/DESIGN.md` §9 列出的「已知限制」之外的核心行為。**沒有自動化的 e2e 測試**（§2 的 171 個測試都用 stub，不叫真的模型）——這是刻意的，因為每次 CI 跑都花 token、還會因為模型輸出的隨機性讓測試不穩定。真要把 §3 這幾步自動化，做法是寫一支跑在 CI 之外（例如手動觸發或排程跑一次）的 smoke test script，判準改成寬鬆的（例如「有沒有 citations」而不是「內容逐字符合」）——這份文件目前先提供人工跑過一遍的步驟，還沒做那支腳本。
 
 ## 5. 常見卡住的地方
 

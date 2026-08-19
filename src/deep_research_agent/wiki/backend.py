@@ -124,3 +124,20 @@ class InMemoryWikiBackend:
 
     def list_namespaces(self) -> list[str]:
         return sorted({p.namespace for p in self._pages.values()})
+
+    # -- inspection ---------------------------------------------------------
+
+    def page_refs(self) -> set[str]:
+        """Every page ref currently stored.
+
+        Exists so a caller can snapshot before a run and diff after, which is
+        how ``examples/run_report.py`` works out which pages the agent just
+        wrote. The report a run produces lives on a wiki page, not in the
+        agent's final message — without this there is no way to read it back
+        out of an in-memory backend before the process exits.
+        """
+        return set(self._pages)
+
+    def get(self, ref: str) -> WikiPage | None:
+        """Fetch by full ``namespace/slug`` reference."""
+        return self._pages.get(ref)

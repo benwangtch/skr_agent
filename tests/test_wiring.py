@@ -299,3 +299,50 @@ class TestImportStyle:
             "relative imports found; this package uses absolute imports "
             f"(from deep_research_agent.…): {offenders}"
         )
+
+
+class TestRetrievingThePublishedReport:
+    """The agent's final message is a short summary by design -- the report is
+    the wiki page it wrote. With an in-memory backend that page is unreachable
+    once the process exits unless something reads it back out, which is what
+    `page_refs()` / `get()` and `run_report.py --out` exist for."""
+
+    def test_page_refs_snapshots_what_exists(self, mesh):
+        before = mesh.backend.page_refs()
+        assert before, "fixtures should provide some pages"
+        assert all("/" in ref for ref in before)
+
+    def test_a_new_page_shows_up_in_the_diff(self, mesh):
+        from deep_research_agent.wiki.backend import WikiPage
+
+        before = mesh.backend.page_refs()
+        mesh.backend.upsert_page(
+            WikiPage(
+                namespace="supply",
+                slug="incident-report-2026-32",
+                title="Report",
+                body="body",
+                source_refs=["rpt-1"],
+            )
+        )
+        assert mesh.backend.page_refs() - before == {"supply/incident-report-2026-32"}
+
+    def test_the_published_page_can_be_read_back_in_full(self, mesh):
+        from deep_research_agent.wiki.backend import WikiPage
+
+        mesh.backend.upsert_page(
+            WikiPage(
+                namespace="supply",
+                slug="r1",
+                title="Report",
+                body="## Summary\nAcme is down.",
+                source_refs=["rpt-1"],
+            )
+        )
+        page = mesh.backend.get("supply/r1")
+        assert page is not None
+        assert "Acme is down." in page.body
+        assert page.source_refs == ["rpt-1"]
+
+    def test_get_returns_none_for_an_unknown_ref(self, mesh):
+        assert mesh.backend.get("supply/no-such-page") is None

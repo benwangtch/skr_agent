@@ -37,6 +37,13 @@ async def main() -> None:
     parser.add_argument("--tier", default="critical")
     parser.add_argument("--dry-run", action="store_true", help="Do not publish.")
     parser.add_argument("--reader-only", action="store_true", help="Drop the write role.")
+    parser.add_argument(
+        "--out",
+        metavar="PATH",
+        help="Write the published report to this file (markdown). "
+        "Without it the report is printed but lost when the process exits, "
+        "because the fixture wiki lives in memory.",
+    )
     parser.add_argument("-v", "--verbose", action="store_true")
     args = parser.parse_args()
 
@@ -80,6 +87,9 @@ async def main() -> None:
 
     print(f"→ {agent.name} as {principal.subject} ({', '.join(sorted(principal.roles))})")
     print(f"  {request.task}\n")
+
+    # Snapshot so we can tell which pages this run actually wrote.
+    before = mesh.backend.page_refs()
     response = await agent.run(request)
 
     print(f"\n=== {response.status} (trace {response.trace_id}) ===\n")
@@ -96,8 +106,25 @@ async def main() -> None:
         f"out={u.output_tokens} cost=${u.cost_usd:.4f}"
     )
 
-    if not args.dry_run and not args.ask:
-        print(f"\nwiki namespaces now: {', '.join(mesh.backend.list_namespaces())}")
+    # The agent's final message is deliberately a short summary -- the report
+    # itself is the wiki page it published. Print that, or it is invisible.
+    published = sorted(mesh.backend.page_refs() - before)
+    if published:
+        pages = [mesh.backend.get(ref) for ref in published]
+        rendered = "\n\n---\n\n".join(
+            f"<!-- {page.ref} -->\n# {page.title}\n\n{page.body}\n\n"
+            f"**Sources:** {', '.join(page.source_refs) or 'none'}"
+            for page in pages
+            if page is not None
+        )
+        print(f"\n=== published report ({', '.join(published)}) ===\n")
+        print(rendered)
+        if args.out:
+            Path(args.out).write_text(rendered, encoding="utf-8")
+            print(f"\n(written to {args.out})")
+    elif not args.dry_run and not args.ask:
+        print("\nNo page was published. Either the agent chose not to, or the "
+              "write was refused -- run with -v and look for 'wiki.write'.")
 
 
 if __name__ == "__main__":

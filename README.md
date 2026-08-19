@@ -104,7 +104,7 @@ The test suite needs no credentials at all.
 ## Run it
 
 ```bash
-uv run python examples/run_report.py                        # user-triggered, own division's access
+uv run python examples/run_report.py --out report.md        # user-triggered; --out saves the published report
 uv run python examples/run_report.py --scheduled            # service account: cross-division, exec roll-up
 uv run python examples/run_report.py --dry-run              # research only
 uv run python examples/run_report.py --reader-only          # exercise the refusal path
@@ -137,7 +137,7 @@ scheduler survive running together).
 ## Test
 
 ```bash
-uv run pytest              # 167 tests, no credentials required
+uv run pytest              # 171 tests, no credentials required
 ```
 
 Coverage: namespace authorization, clearance-gated namespaces, the

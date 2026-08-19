@@ -315,10 +315,10 @@ await asyncio.gather(
 ## 8. 測試策略
 
 ```
-167 個測試，全部不需要金鑰、不呼叫模型
+171 個測試，全部不需要金鑰、不呼叫模型
   test_wiki_authz.py  32   namespace 授權、clearance、aggregation leak
   test_a2a_server.py  32   executor 生命週期 + 6 個走真 handler/HTTP 的整合測試
-  test_wiring.py      30   tool 清單、subagent 邊界、deep research 結構、import 風格
+  test_wiring.py      34   tool 清單、subagent 邊界、deep research 結構、報告取回、import 風格
   test_config.py      22   provider 預設、env 覆蓋、chat model 形狀
   test_scheduler.py   19   cron 時序、失敗隔離
   test_mcp.py         17   設定解析、降級、對真的 MCP server 載入/呼叫/citation
