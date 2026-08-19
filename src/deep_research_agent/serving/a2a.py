@@ -90,9 +90,9 @@ from a2a.utils import TransportProtocol
 from fastapi import FastAPI
 from google.protobuf.json_format import MessageToDict
 
-from skr_agent.mesh import AgentRegistry
-from skr_agent.protocol import AgentRequest, AgentResponse, Authorizer, Denied, Principal
-from skr_agent.runtime import DeepAgent
+from deep_research_agent.mesh import AgentRegistry
+from deep_research_agent.protocol import AgentRequest, AgentResponse, Authorizer, Denied, Principal
+from deep_research_agent.runtime import DeepAgent
 
 log = logging.getLogger(__name__)
 
@@ -445,7 +445,7 @@ def serve(
 
     To run alongside the scheduler in one process, build the app with
     ``build_a2a_app`` and drive it with ``uvicorn.Server(...).serve()`` inside
-    your own ``asyncio.gather`` instead — see ``skr_agent.serving.service``.
+    your own ``asyncio.gather`` instead — see ``deep_research_agent.serving.service``.
     """
     app = build_a2a_app(
         agent,

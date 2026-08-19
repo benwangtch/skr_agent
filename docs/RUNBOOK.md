@@ -9,17 +9,17 @@
 ## 0. 專案現狀速覽
 
 ```
-src/skr_agent/
+src/deep_research_agent/
   protocol.py, mesh.py, runtime.py     契約層 + agent-as-tool + deepagents 執行殼
   principals.py                        service_principal() vs user_principal()
   assembly.py                          build_mesh() —— 組裝整個系統的唯一入口
   config/                              env-driven 設定（llm.py 有真的接上；db.py / minio.py 是佔位）
   wiki/                                三個資料來源之一，唯一有授權模型的那個
-  report/                              skr agent 本體 + BOM/news 資料來源
+  report/                              agent 本體 + BOM/news 資料來源
   serving/                             A2A server（streaming）+ cron-like scheduler
 fixtures/                              4 家公司、5 頁 wiki（namespace: supply / platform / shared）、4 份原始週報
 examples/
-  run_report.py                        單次執行 skr agent（掃描或單一提問）
+  run_report.py                        單次執行 agent（掃描或單一提問）
   run_service.py                       同時跑 A2A server + 排程
 tests/                                 167 個測試，6 個檔案，全部不需要金鑰
 ```
@@ -44,7 +44,7 @@ LLM_API_KEY=sk-or-v1-你的OpenRouter金鑰    # 去 https://openrouter.ai/keys 
 驗證設定有生效，不用花錢：
 
 ```bash
-uv run python -c "from skr_agent.config import get_llm; l=get_llm(); print(l.provider, l.resolved_base_url(), l.resolved_model())"
+uv run python -c "from deep_research_agent.config import get_llm; l=get_llm(); print(l.provider, l.resolved_base_url(), l.resolved_model())"
 # 應該看到 openrouter https://openrouter.ai/api/v1 qwen/qwen3.5-plus-02-15
 ```
 
@@ -162,7 +162,7 @@ uv run python examples/run_service.py --port 8000 --cron "*/5 * * * *" -v
 curl -s http://localhost:8000/.well-known/agent-card.json | python3 -m json.tool
 ```
 
-預期看到 `"name": "skr_agent"`、`skills` 陣列有 `skr_agent`、`capabilities.streaming` 是 `true`。
+預期看到 `"name": "deep_research_agent"`、`skills` 陣列有 `deep_research_agent`、`capabilities.streaming` 是 `true`。
 
 ```bash
 curl -s http://localhost:8000/ \
@@ -200,7 +200,7 @@ curl -N -s http://localhost:8000/ \
 排程那邊：等到 cron 觸發的分鐘數（用 `*/5` 的話最多等 5 分鐘），觀察第一個 terminal 的 log，應該看到：
 
 ```
-scheduler.fire job=weekly-bom-sweep agent=skr_agent trace=...
+scheduler.fire job=weekly-bom-sweep agent=deep_research_agent trace=...
 ```
 
 跑完後可以再打一次 agent-card 或直接看 log 裡 `wiki.write` 那行，確認排程觸發的這次也走了同一套授權邏輯（`service_principal()`，寫進 `exec`）。
@@ -222,7 +222,7 @@ MCP_TOKEN=內部服務發的憑證
 
 ```bash
 uv run python -c "
-import asyncio; from skr_agent.mcp import load_mcp_tools
+import asyncio; from deep_research_agent.mcp import load_mcp_tools
 for s, t in asyncio.run(load_mcp_tools()):
     print(f'{s}: {t.name} — {t.description[:70]}')
 "
@@ -232,7 +232,7 @@ for s, t in asyncio.run(load_mcp_tools()):
 
 | 現象 | 意思 | 怎麼辦 |
 |---|---|---|
-| 完全沒輸出，也沒有 log | `MCP_*` 沒設到，`connections()` 是空的 | 檢查 `.env` 有沒有被讀到：`uv run python -c "from skr_agent.config import get_mcp; print(get_mcp().connections())"` |
+| 完全沒輸出，也沒有 log | `MCP_*` 沒設到，`connections()` 是空的 | 檢查 `.env` 有沒有被讀到：`uv run python -c "from deep_research_agent.config import get_mcp; print(get_mcp().connections())"` |
 | log 有 `mcp.load_failed` | 有設定但連不上／認證失敗 | 看那行 exception。連不上是**跳過**不是致命錯，所以 agent 還是會起來，只是少了那些 tool |
 
 **接著跑一次真的 agent**，確認模型看得到、也會用：
@@ -277,7 +277,7 @@ description: 一句話講這個 skill 管什麼
 實際的規範內容。
 ```
 
-然後在 `src/skr_agent/report/agent.py` 的 `DEFAULT_SKILLS` 加上名字：
+然後在 `src/deep_research_agent/report/agent.py` 的 `DEFAULT_SKILLS` 加上名字：
 
 ```python
 DEFAULT_SKILLS = ("incident-report", "your-skill")
@@ -287,7 +287,7 @@ DEFAULT_SKILLS = ("incident-report", "your-skill")
 
 ```bash
 uv run python -c "
-from pathlib import Path; from skr_agent import build_mesh
+from pathlib import Path; from deep_research_agent import build_mesh
 m = build_mesh(fixtures='fixtures', project_root='.')
 p = m.report_agent._full_system_prompt()
 print('your-skill 在 prompt 裡:', 'your-skill' in p)

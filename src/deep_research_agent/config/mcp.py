@@ -27,7 +27,7 @@ from typing import Any, Literal
 from pydantic import SecretStr
 from pydantic_settings import SettingsConfigDict
 
-from skr_agent.config.base import BaseConfig
+from deep_research_agent.config.base import BaseConfig
 
 log = logging.getLogger(__name__)
 
@@ -51,7 +51,7 @@ class MCP(BaseConfig):
     """Sent as ``Authorization: Bearer <token>`` on every call to ``url``.
 
     This is a *connection-level* service credential, not the end user's — see
-    the note on identity in ``skr_agent.mcp``."""
+    the note on identity in ``deep_research_agent.mcp``."""
 
     server_name         : str               = 'mcp'
     """Label for the ``url`` server. Only shows up in logs and errors."""

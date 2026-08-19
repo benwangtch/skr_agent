@@ -12,9 +12,9 @@ from dataclasses import asdict
 
 from langchain_core.tools import BaseTool, StructuredTool
 
-from skr_agent.protocol import Citation
-from skr_agent.runtime import ToolBundle, ToolContext
-from skr_agent.report.sources import BomSource, NewsFeed
+from deep_research_agent.protocol import Citation
+from deep_research_agent.runtime import ToolBundle, ToolContext
+from deep_research_agent.report.sources import BomSource, NewsFeed
 
 __all__ = ["make_bom_toolset", "make_news_toolset"]
 

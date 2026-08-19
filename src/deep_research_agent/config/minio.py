@@ -10,7 +10,7 @@ from functools import lru_cache
 from pydantic import SecretStr
 from pydantic_settings import SettingsConfigDict
 
-from skr_agent.config.base import BaseConfig
+from deep_research_agent.config.base import BaseConfig
 
 __all__ = ["Minio", "get_minio"]
 

@@ -1,5 +1,5 @@
-from skr_agent.report.agent import AGENT_NAME, SYSTEM_PROMPT, build_skr_agent, report_spec
-from skr_agent.report.sources import (
+from deep_research_agent.report.agent import AGENT_NAME, SYSTEM_PROMPT, build_deep_research_agent, report_spec
+from deep_research_agent.report.sources import (
     Article,
     BomSource,
     Company,
@@ -11,7 +11,7 @@ from skr_agent.report.sources import (
 __all__ = [
     "AGENT_NAME",
     "SYSTEM_PROMPT",
-    "build_skr_agent",
+    "build_deep_research_agent",
     "report_spec",
     "Article",
     "Company",

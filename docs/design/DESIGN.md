@@ -1,7 +1,7 @@
-# skr agent — 設計文件
+# deep research agent — 設計文件
 
 狀態：實作完成，對應現行程式碼
-範圍：整個 `src/skr_agent/`
+範圍：整個 `src/deep_research_agent/`
 
 這份文件描述系統**現在的樣子**。它取代了先前的 `00-architecture.md`、`01-config.md`、`03-agent-architecture-and-serving.md`——那三份是不同時間點寫的，各自帶著「上一版我判斷錯了」的修訂記錄，疊在一起之後同一件事有三個地方講、而且開始互相矛盾。演進過程在 git log 裡，這裡只講結論。
 
@@ -11,7 +11,7 @@
 
 ## 1. 這是什麼
 
-**skr agent 是一個 deep research agent。** 它接開放式問題（「這週供應鏈有什麼事」、「ASC-4400 的曝險多少」），自己決定要挖多深，跨多個資料來源交叉比對，產出**每個主張都有出處**的報告，並發布到內部 wiki。
+**這是一個 deep research agent。** 它接開放式問題（「這週供應鏈有什麼事」、「ASC-4400 的曝險多少」），自己決定要挖多深，跨多個資料來源交叉比對，產出**每個主張都有出處**的報告，並發布到內部 wiki。
 
 它可以被三種方式觸發，走的是同一條程式碼路徑：
 
@@ -130,7 +130,7 @@ Deep research 最常見的失敗不是查不到，是**寫出一句看起來合�
 
 ```
 ┌─────────────────────────────────────────────────────────────┐
-│                    skr agent (report/agent.py)               │
+│              deep research agent (report/agent.py)           │
 │                                                              │
 │  BOM              list_bom_companies / get_bom_company       │
 │  外部新聞          search_news / fetch_article                 │
@@ -235,7 +235,7 @@ LLM_MODEL=內部 model 名稱
 
 ### 7.1 A2A：版本是 1.1.2
 
-`serving/a2a.py` 把 skr agent 包成講 A2A（JSON-RPC + SSE）的 FastAPI app。**1.1.2 是 PyPI 上最新的 1.x**（1.0.0 → 1.0.3 → 1.1.0 → 1.1.2，沒有 1.2/1.3）。釘死版本，因為 0.3.x → 1.x 每一項都是破壞性變更：
+`serving/a2a.py` 把 agent 包成講 A2A（JSON-RPC + SSE）的 FastAPI app。**1.1.2 是 PyPI 上最新的 1.x**（1.0.0 → 1.0.3 → 1.1.0 → 1.1.2，沒有 1.2/1.3）。釘死版本，因為 0.3.x → 1.x 每一項都是破壞性變更：
 
 | 0.3.x | 1.1.x |
 |---|---|
@@ -370,4 +370,4 @@ await asyncio.gather(
 
 新增一個 IO service：複製 `config/db.py` 的形狀（一個檔案、一個 class、一個 `env_prefix`、一個 cached getter、在 `__init__.py` 匯出）。
 
-套件內 import 一律**絕對 import**（`from skr_agent.x import y`），`tests/test_wiring.py::TestImportStyle` 擋著。
+套件內 import 一律**絕對 import**（`from deep_research_agent.x import y`），`tests/test_wiring.py::TestImportStyle` 擋著。

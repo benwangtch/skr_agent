@@ -400,6 +400,51 @@ wheels = [
 ]
 
 [[package]]
+name = "deep-research-agent"
+version = "0.1.0"
+source = { editable = "." }
+dependencies = [
+    { name = "a2a-sdk", extra = ["http-server"] },
+    { name = "croniter" },
+    { name = "deepagents" },
+    { name = "fastapi" },
+    { name = "langchain-anthropic" },
+    { name = "langchain-mcp-adapters" },
+    { name = "langchain-openai" },
+    { name = "mcp" },
+    { name = "pydantic-settings" },
+    { name = "uvicorn", extra = ["standard"] },
+]
+
+[package.dev-dependencies]
+dev = [
+    { name = "httpx" },
+    { name = "pytest" },
+    { name = "pytest-asyncio" },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "a2a-sdk", extras = ["http-server"], specifier = "==1.1.2" },
+    { name = "croniter", specifier = ">=2.0" },
+    { name = "deepagents", specifier = ">=0.7.4" },
+    { name = "fastapi", specifier = ">=0.110" },
+    { name = "langchain-anthropic", specifier = ">=1.5.3" },
+    { name = "langchain-mcp-adapters", specifier = ">=0.3.1" },
+    { name = "langchain-openai", specifier = ">=1.4.1" },
+    { name = "mcp", specifier = ">=1.24,<2" },
+    { name = "pydantic-settings", specifier = ">=2.5" },
+    { name = "uvicorn", extras = ["standard"], specifier = ">=0.30" },
+]
+
+[package.metadata.requires-dev]
+dev = [
+    { name = "httpx", specifier = ">=0.27" },
+    { name = "pytest", specifier = ">=8.0" },
+    { name = "pytest-asyncio", specifier = ">=0.23" },
+]
+
+[[package]]
 name = "deepagents"
 version = "0.7.4"
 source = { registry = "https://pypi.org/simple" }
@@ -1764,51 +1809,6 @@ source = { registry = "https://pypi.org/simple" }
 sdist = { url = "https://files.pythonhosted.org/packages/94/e7/b2c673351809dca68a0e064b6af791aa332cf192da575fd474ed7d6f16a2/six-1.17.0.tar.gz", hash = "sha256:ff70335d468e7eb6ec65b95b99d3a2836546063f63acc5171de367e834932a81", size = 34031, upload-time = "2024-12-04T17:35:28.174Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/b7/ce/149a00dd41f10bc29e5921b496af8b574d8413afcd5e30dfa0ed46c2cc5e/six-1.17.0-py2.py3-none-any.whl", hash = "sha256:4721f391ed90541fddacab5acf947aa0d3dc7d27b2e1e8eda2be8970586c3274", size = 11050, upload-time = "2024-12-04T17:35:26.475Z" },
-]
-
-[[package]]
-name = "skr-agent"
-version = "0.1.0"
-source = { editable = "." }
-dependencies = [
-    { name = "a2a-sdk", extra = ["http-server"] },
-    { name = "croniter" },
-    { name = "deepagents" },
-    { name = "fastapi" },
-    { name = "langchain-anthropic" },
-    { name = "langchain-mcp-adapters" },
-    { name = "langchain-openai" },
-    { name = "mcp" },
-    { name = "pydantic-settings" },
-    { name = "uvicorn", extra = ["standard"] },
-]
-
-[package.dev-dependencies]
-dev = [
-    { name = "httpx" },
-    { name = "pytest" },
-    { name = "pytest-asyncio" },
-]
-
-[package.metadata]
-requires-dist = [
-    { name = "a2a-sdk", extras = ["http-server"], specifier = "==1.1.2" },
-    { name = "croniter", specifier = ">=2.0" },
-    { name = "deepagents", specifier = ">=0.7.4" },
-    { name = "fastapi", specifier = ">=0.110" },
-    { name = "langchain-anthropic", specifier = ">=1.5.3" },
-    { name = "langchain-mcp-adapters", specifier = ">=0.3.1" },
-    { name = "langchain-openai", specifier = ">=1.4.1" },
-    { name = "mcp", specifier = ">=1.24,<2" },
-    { name = "pydantic-settings", specifier = ">=2.5" },
-    { name = "uvicorn", extras = ["standard"], specifier = ">=0.30" },
-]
-
-[package.metadata.requires-dev]
-dev = [
-    { name = "httpx", specifier = ">=0.27" },
-    { name = "pytest", specifier = ">=8.0" },
-    { name = "pytest-asyncio", specifier = ">=0.23" },
 ]
 
 [[package]]

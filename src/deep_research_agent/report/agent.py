@@ -1,4 +1,4 @@
-"""skr agent: the deep research agent this repo builds.
+"""The deep research agent this repo builds.
 
 It answers open-ended supply-chain questions by working across every source it
 has — the bill of materials, external news, and the internal wiki — and
@@ -12,7 +12,7 @@ Sources that need authorization enforce it in their own tool layer, against
 the principal that triggered the run, so this agent never learns the rules.
 What a report contains therefore depends on who asked for it: the scheduled
 service account sees across divisions, a user sees their own. See
-``skr_agent.principals``.
+``deep_research_agent.principals``.
 """
 
 from __future__ import annotations
@@ -22,17 +22,17 @@ from typing import Any, Sequence
 
 from langchain_core.tools import BaseTool
 
-from skr_agent.protocol import AgentSpec
-from skr_agent.runtime import DeepAgent, ToolContext, ToolsetFactory
-from skr_agent.wiki.authz import WikiAuthorizer
-from skr_agent.wiki.backend import WikiBackend
-from skr_agent.wiki.tools import make_wiki_toolset
-from skr_agent.report.sources import BomSource, NewsFeed
-from skr_agent.report.tools import make_bom_toolset, make_news_toolset
+from deep_research_agent.protocol import AgentSpec
+from deep_research_agent.runtime import DeepAgent, ToolContext, ToolsetFactory
+from deep_research_agent.wiki.authz import WikiAuthorizer
+from deep_research_agent.wiki.backend import WikiBackend
+from deep_research_agent.wiki.tools import make_wiki_toolset
+from deep_research_agent.report.sources import BomSource, NewsFeed
+from deep_research_agent.report.tools import make_bom_toolset, make_news_toolset
 
-__all__ = ["build_skr_agent", "SYSTEM_PROMPT", "AGENT_NAME"]
+__all__ = ["build_deep_research_agent", "SYSTEM_PROMPT", "AGENT_NAME"]
 
-AGENT_NAME = "skr_agent"
+AGENT_NAME = "deep_research_agent"
 
 DEFAULT_SKILLS = ("incident-report",)
 """Skill directories under ``.claude/skills/`` inlined into the prompt."""
@@ -70,7 +70,7 @@ is to check the claims in front of it, not to go find new ones."""
 
 
 SYSTEM_PROMPT = """\
-You are skr agent, a deep research agent. You investigate open-ended questions
+You are a deep research agent. You investigate open-ended questions
 about our supply chain by pulling together everything available to you, and you
 publish sourced findings.
 
@@ -234,7 +234,7 @@ than useless, because it will be trusted.
 """
 
 
-def build_skr_agent(
+def build_deep_research_agent(
     *,
     bom: BomSource,
     news: NewsFeed,
@@ -246,7 +246,7 @@ def build_skr_agent(
     skills: Sequence[str] = DEFAULT_SKILLS,
     extra_toolsets: Sequence[ToolsetFactory] = (),
 ) -> DeepAgent:
-    """Wire up skr agent with its sources, subagent, and report rubric.
+    """Wire up the research agent with its sources, subagents, and report rubric.
 
     ``skills`` names directories under ``.claude/skills/``; each one's
     ``SKILL.md`` body is inlined into the system prompt (see ``runtime.py`` for
@@ -254,7 +254,7 @@ def build_skr_agent(
     the directory in and naming it here.
 
     ``extra_toolsets`` adds data sources beyond the three built in — MCP
-    servers arrive this way (``skr_agent.mcp``).
+    servers arrive this way (``deep_research_agent.mcp``).
     """
 
     def subagents(ctx: ToolContext, tools: dict[str, BaseTool]) -> list[dict[str, Any]]:
@@ -337,5 +337,5 @@ def build_skr_agent(
 
 
 def report_spec(agent: DeepAgent) -> AgentSpec:
-    """Convenience: skr agent as something another agent can call."""
+    """Convenience: the research agent as something another agent can call."""
     return agent.as_spec()

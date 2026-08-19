@@ -10,11 +10,11 @@ from pathlib import Path
 
 import pytest
 
-from skr_agent import build_mesh
-from skr_agent.principals import service_principal, user_principal
-from skr_agent.protocol import AgentRequest, Budget
-from skr_agent.runtime import ToolContext, _extract_json, load_skill
-from skr_agent.wiki.authz import EXEC_NAMESPACE
+from deep_research_agent import build_mesh
+from deep_research_agent.principals import service_principal, user_principal
+from deep_research_agent.protocol import AgentRequest, Budget
+from deep_research_agent.runtime import ToolContext, _extract_json, load_skill
+from deep_research_agent.wiki.authz import EXEC_NAMESPACE
 
 ROOT = Path(__file__).resolve().parent.parent
 ALICE = user_principal("alice", "supply", roles={"wiki.reader", "wiki.writer"})
@@ -44,15 +44,15 @@ def surface(agent, principal=ALICE, budget=None):
     return {t.name for t in tools}, subagents, ctx
 
 
-class TestSkrAgentWiring:
-    def test_registry_exposes_skr_agent_by_default(self, mesh):
+class TestDeepResearchAgentWiring:
+    def test_registry_exposes_deep_research_agent_by_default(self, mesh):
         names = {s.name for s in mesh.registry.list()}
-        assert names == {"skr_agent"}
+        assert names == {"deep_research_agent"}
         assert mesh.coordinator is None
 
     def test_wiki_agent_is_opt_in(self, mesh_with_wiki_agent):
         names = {s.name for s in mesh_with_wiki_agent.registry.list()}
-        assert names == {"skr_agent", "wiki_ask"}
+        assert names == {"deep_research_agent", "wiki_ask"}
         assert mesh_with_wiki_agent.coordinator is not None
 
     def test_wiki_is_reached_only_through_its_own_authorized_tools(self, mesh):
@@ -135,7 +135,7 @@ class TestDeepResearchStructure:
         assert "/findings/" in prompt
 
     def test_the_investigator_is_told_to_write_its_findings_file(self):
-        from skr_agent.report.agent import INVESTIGATOR_PROMPT
+        from deep_research_agent.report.agent import INVESTIGATOR_PROMPT
 
         assert "/findings/" in INVESTIGATOR_PROMPT
 
@@ -166,14 +166,14 @@ class TestBudgetPropagation:
         assert parent.child(max_turns=50).max_turns == 10
 
 
-class TestEmbeddingSkrAgentInAnotherAgent:
-    """skr agent's in-process integration surface: `agent_as_tool` wraps it so
+class TestEmbeddingDeepResearchAgentInAnotherAgent:
+    """The agent's in-process integration surface: `agent_as_tool` wraps it so
     a caller's model can invoke it. No agent in this repo does that any more —
     this is the seam a consumer outside it uses, so it stays covered."""
 
-    def test_skr_agent_can_be_mounted_as_a_tool_on_another_agent(self, mesh):
-        from skr_agent.mesh import agents_as_tools
-        from skr_agent.runtime import DeepAgent
+    def test_deep_research_agent_can_be_mounted_as_a_tool_on_another_agent(self, mesh):
+        from deep_research_agent.mesh import agents_as_tools
+        from deep_research_agent.runtime import DeepAgent
 
         def feature_tools(ctx):
             return agents_as_tools(
@@ -182,18 +182,18 @@ class TestEmbeddingSkrAgentInAnotherAgent:
 
         caller = DeepAgent(
             name="caller",
-            description="an agent that delegates to skr agent",
+            description="an agent that delegates to the research agent",
             system_prompt="delegate",
             toolsets=[feature_tools],
         )
         names, _, _ = surface(caller)
-        assert names == {"skr_agent"}
+        assert names == {"deep_research_agent"}
 
     def test_a_read_only_wiki_toolset_omits_the_write_tool(self, mesh):
         """`writable=False` removes the capability rather than refusing it —
         what a read-only consumer mounts."""
-        from skr_agent.runtime import DeepAgent
-        from skr_agent.wiki.tools import make_wiki_toolset
+        from deep_research_agent.runtime import DeepAgent
+        from deep_research_agent.wiki.tools import make_wiki_toolset
 
         reader = DeepAgent(
             name="reader",
@@ -240,9 +240,9 @@ class TestAddingYourOwnSkill:
     -- inlined in full, not merely advertised."""
 
     def test_a_second_skill_is_inlined_too(self, tmp_path):
-        from skr_agent.report import build_skr_agent
-        from skr_agent.report.sources import FixtureBom, FixtureNewsFeed
-        from skr_agent.wiki import InMemoryWikiBackend, WikiAuthorizer
+        from deep_research_agent.report import build_deep_research_agent
+        from deep_research_agent.report.sources import FixtureBom, FixtureNewsFeed
+        from deep_research_agent.wiki import InMemoryWikiBackend, WikiAuthorizer
 
         skill_dir = tmp_path / ".claude" / "skills" / "house-style"
         skill_dir.mkdir(parents=True)
@@ -256,7 +256,7 @@ class TestAddingYourOwnSkill:
         builtin.mkdir(parents=True)
         (builtin / "SKILL.md").write_text("# Rubric\n\nSeverity rubric here.\n", encoding="utf-8")
 
-        agent = build_skr_agent(
+        agent = build_deep_research_agent(
             bom=FixtureBom.from_fixtures(ROOT / "fixtures"),
             news=FixtureNewsFeed.from_fixtures(ROOT / "fixtures"),
             wiki_backend=InMemoryWikiBackend.from_fixtures(ROOT / "fixtures"),
@@ -271,14 +271,14 @@ class TestAddingYourOwnSkill:
     def test_a_missing_skill_fails_loudly_at_build_time(self, tmp_path):
         """Better than a run that silently ignores the rubric it was told to
         follow."""
-        from skr_agent.runtime import load_skill
+        from deep_research_agent.runtime import load_skill
 
         with pytest.raises(FileNotFoundError):
             load_skill(tmp_path, "no-such-skill")
 
 
 class TestImportStyle:
-    """Imports inside the package are absolute (`from skr_agent.x import y`).
+    """Imports inside the package are absolute (`from deep_research_agent.x import y`).
 
     A convention with no check drifts back within a few commits, and the
     failure is silent — a relative import works fine until someone moves the
@@ -297,5 +297,5 @@ class TestImportStyle:
         ]
         assert offenders == [], (
             "relative imports found; this package uses absolute imports "
-            f"(from skr_agent.…): {offenders}"
+            f"(from deep_research_agent.…): {offenders}"
         )

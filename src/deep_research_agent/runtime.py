@@ -1,4 +1,4 @@
-"""The skr agent runtime: a deep research agent on LangChain's ``deepagents``.
+"""The runtime: a deep research agent on LangChain's ``deepagents``.
 
 Everything feature-specific — which tools exist, what the prompt says, which
 subagents to spawn — is injected. What lives here is the part every agent
@@ -35,8 +35,8 @@ from typing import Any, AsyncIterator, Callable, Iterable, Sequence
 from langchain_core.messages import AIMessage, BaseMessage, ToolMessage
 from langchain_core.tools import BaseTool
 
-from skr_agent.config import get_llm
-from skr_agent.protocol import (
+from deep_research_agent.config import get_llm
+from deep_research_agent.protocol import (
     AgentRequest,
     AgentResponse,
     AgentSpec,

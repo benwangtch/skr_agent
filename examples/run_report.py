@@ -17,10 +17,10 @@ import asyncio
 import logging
 from pathlib import Path
 
-from skr_agent import Budget, build_mesh
-from skr_agent.mcp import mcp_toolset_from_config
-from skr_agent.principals import service_principal, user_principal
-from skr_agent.protocol import AgentRequest
+from deep_research_agent import Budget, build_mesh
+from deep_research_agent.mcp import mcp_toolset_from_config
+from deep_research_agent.principals import service_principal, user_principal
+from deep_research_agent.protocol import AgentRequest
 
 ROOT = Path(__file__).resolve().parent.parent
 

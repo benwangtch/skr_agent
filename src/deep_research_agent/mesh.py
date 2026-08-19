@@ -14,7 +14,7 @@ from typing import Any, Callable, Iterable
 
 from langchain_core.tools import BaseTool, StructuredTool
 
-from skr_agent.protocol import (
+from deep_research_agent.protocol import (
     AgentRequest,
     AgentResponse,
     AgentSpec,

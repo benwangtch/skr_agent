@@ -47,7 +47,7 @@ uv.lock             依賴的「事實」（實際解析出來、釘死版本的
 dev = ["pytest>=8.0", "pytest-asyncio>=0.23", "httpx>=0.27"]
 ```
 
-`optional-dependencies` 這個欄位的原始語意是「這個套件的**使用者**可以選擇裝的額外功能」（例如某個套件的 `[redis]` extra，代表「如果你要用到 Redis 整合就多裝這些」）。dev 依賴不是這個東西——它們是「開發這個套件的人需要的工具」，跟這個套件本身要不要被別人 `pip install skr-agent[dev]` 沒有關係，事實上也不會有人這樣裝。
+`optional-dependencies` 這個欄位的原始語意是「這個套件的**使用者**可以選擇裝的額外功能」（例如某個套件的 `[redis]` extra，代表「如果你要用到 Redis 整合就多裝這些」）。dev 依賴不是這個東西——它們是「開發這個套件的人需要的工具」，跟這個套件本身要不要被別人 `pip install deep-research-agent[dev]` 沒有關係，事實上也不會有人這樣裝。
 
 `[dependency-groups]`（PEP 735，uv 原生支援）語意才是對的：
 

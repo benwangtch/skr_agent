@@ -8,8 +8,8 @@ import datetime as dt
 
 import pytest
 
-from skr_agent.protocol import AgentRequest, AgentResponse, Principal
-from skr_agent.serving.scheduler import ScheduledJob, Scheduler
+from deep_research_agent.protocol import AgentRequest, AgentResponse, Principal
+from deep_research_agent.serving.scheduler import ScheduledJob, Scheduler
 
 ALICE = Principal(subject="alice", division="supply")
 UTC = dt.timezone.utc

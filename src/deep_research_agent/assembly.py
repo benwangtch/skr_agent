@@ -11,10 +11,10 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Sequence
 
-from skr_agent.mesh import AgentRegistry
-from skr_agent.report import FixtureBom, FixtureNewsFeed, build_skr_agent
-from skr_agent.runtime import DeepAgent, ToolsetFactory
-from skr_agent.wiki import InMemoryWikiBackend, WikiAuthorizer, WikiBackend, WikiCoordinator
+from deep_research_agent.mesh import AgentRegistry
+from deep_research_agent.report import FixtureBom, FixtureNewsFeed, build_deep_research_agent
+from deep_research_agent.runtime import DeepAgent, ToolsetFactory
+from deep_research_agent.wiki import InMemoryWikiBackend, WikiAuthorizer, WikiBackend, WikiCoordinator
 
 __all__ = ["Mesh", "build_mesh"]
 
@@ -25,7 +25,7 @@ class Mesh:
     backend: WikiBackend
     authz: WikiAuthorizer
     report_agent: DeepAgent
-    """skr agent. Named for what it produces, not for the framework under it."""
+    """The deep research agent itself."""
     coordinator: WikiCoordinator | None = field(default=None)
     """Only present when ``with_wiki_agent=True``. See ``build_mesh``."""
 
@@ -38,7 +38,7 @@ def build_mesh(
     with_wiki_agent: bool = False,
     extra_toolsets: Sequence[ToolsetFactory] = (),
 ) -> Mesh:
-    """Build skr agent and its data sources against fixture data.
+    """Build the research agent and its data sources against fixture data.
 
     ``with_wiki_agent`` controls an open question in the design: by default the
     wiki is a set of authorized tools that callers mount directly, which is one
@@ -47,7 +47,7 @@ def build_mesh(
     of retrieval quality (query rewriting, reranking, multi-hop) behind it.
 
     ``extra_toolsets`` mounts additional data sources on the report agent —
-    this is how MCP servers get in (see ``skr_agent.mcp``). It is a parameter
+    this is how MCP servers get in (see ``deep_research_agent.mcp``). It is a parameter
     rather than something this function loads itself because MCP discovery is
     async and this is not: the caller loads once at startup and passes the
     result down. ``examples/run_report.py`` and ``serving/service.py`` both do.
@@ -60,7 +60,7 @@ def build_mesh(
     backend = InMemoryWikiBackend.from_fixtures(fixtures)
     authz = WikiAuthorizer()
 
-    report_agent = build_skr_agent(
+    report_agent = build_deep_research_agent(
         bom=FixtureBom.from_fixtures(fixtures),
         news=FixtureNewsFeed.from_fixtures(fixtures),
         wiki_backend=backend,

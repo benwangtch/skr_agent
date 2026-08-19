@@ -25,8 +25,8 @@ from typing import Any, Awaitable, Callable
 
 from croniter import croniter
 
-from skr_agent.protocol import AgentRequest, AgentResponse, Budget, Principal
-from skr_agent.runtime import DeepAgent
+from deep_research_agent.protocol import AgentRequest, AgentResponse, Budget, Principal
+from deep_research_agent.runtime import DeepAgent
 
 log = logging.getLogger(__name__)
 

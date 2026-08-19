@@ -13,7 +13,7 @@ import os
 
 import pytest
 
-from skr_agent.config import LLM, get_llm, reset_settings_cache
+from deep_research_agent.config import LLM, get_llm, reset_settings_cache
 
 ENV_PREFIXES = ("LLM_", "DB_", "MINIO_")
 
@@ -140,19 +140,19 @@ class TestEnvVarOverrides:
 
 class TestOtherServicesFollowTheSamePattern:
     def test_minio_has_its_own_prefix_and_defaults(self):
-        from skr_agent.config import Minio
+        from deep_research_agent.config import Minio
 
         m = Minio()
         assert m.bucket_name == "cpoml-object-storage"
 
     def test_minio_env_prefix_is_isolated_from_llm(self, monkeypatch):
         monkeypatch.setenv("MINIO_BUCKET_NAME", "some-other-bucket")
-        from skr_agent.config import Minio
+        from deep_research_agent.config import Minio
 
         assert Minio().bucket_name == "some-other-bucket"
         assert LLM().provider == "openrouter"  # untouched by the minio_ var
 
     def test_db_dsn_defaults_empty(self):
-        from skr_agent.config import DB
+        from deep_research_agent.config import DB
 
         assert DB().dsn.get_secret_value() == ""

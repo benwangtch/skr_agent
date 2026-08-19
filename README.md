@@ -1,6 +1,6 @@
-# skr-agent
+# deep-research-agent
 
-**skr agent** — a deep research agent built on LangChain's
+A **deep research agent** built on LangChain's
 [`deepagents`](https://github.com/langchain-ai/deepagents). It takes open-ended
 supply-chain questions, decides for itself how deep to dig, cross-references
 several data sources, and publishes a sourced report. It is servable over
@@ -31,7 +31,7 @@ kind that actually calls the model, unlike the test suite below).
 ## Layout
 
 ```
-src/skr_agent/
+src/deep_research_agent/
   protocol.py      the contract every agent speaks (no agent-framework dependency)
   mesh.py          agent-as-tool adapter + registry
   runtime.py       DeepAgent — thin shell over deepagents/LangGraph, config-driven
@@ -51,7 +51,7 @@ src/skr_agent/
     coordinator.py     optional LLM synthesis layer over the same tools (opt-in, off by default)
   report/
     sources.py / tools.py   BOM + news data sources and their tools
-    agent.py          ★ skr agent itself: prompt, sources, subagents, rubric
+    agent.py          ★ the agent itself: prompt, sources, subagents, rubric
                         (company-investigator + fact-checker)
   serving/
     a2a.py            ★ serve any DeepAgent as a streaming A2A server
@@ -97,7 +97,7 @@ verification steps; `DESIGN.md` §5.5 has the full caveat.
 
 To add your own **skill** (a rubric the agent must follow every run): drop
 `.claude/skills/<name>/SKILL.md` in and add the name to `DEFAULT_SKILLS` in
-`src/skr_agent/report/agent.py`. RUNBOOK §3.8, `DESIGN.md` §3.3.
+`src/deep_research_agent/report/agent.py`. RUNBOOK §3.8, `DESIGN.md` §3.3.
 
 The test suite needs no credentials at all.
 
@@ -124,7 +124,7 @@ curl http://localhost:8000/ \
 ```
 
 Scheduled and on-demand runs are the same agent with a different `Principal`
-(`skr_agent.principals`) — that difference is what makes a scheduled sweep see
+(`deep_research_agent.principals`) — that difference is what makes a scheduled sweep see
 the executive roll-up while a user only ever sees their own division. See
 [`DESIGN.md`](docs/design/DESIGN.md) §5.3.
 
@@ -174,7 +174,7 @@ Adding a feature? Three questions, in order (`DESIGN.md` §10):
    third party)? → decide their grants explicitly now, the way
    `principals.py` does — don't assume the same input implies the same output.
 
-Imports inside the package are **absolute** (`from skr_agent.wiki.authz import
+Imports inside the package are **absolute** (`from deep_research_agent.wiki.authz import
 WikiAuthorizer`), never relative. A test enforces it — see
 `tests/test_wiring.py::TestImportStyle`.
 

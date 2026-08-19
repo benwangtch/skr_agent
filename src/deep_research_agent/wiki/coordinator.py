@@ -21,11 +21,11 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from skr_agent.protocol import AgentSpec
-from skr_agent.runtime import DeepAgent
-from skr_agent.wiki.authz import WikiAuthorizer
-from skr_agent.wiki.backend import WikiBackend
-from skr_agent.wiki.tools import make_wiki_toolset
+from deep_research_agent.protocol import AgentSpec
+from deep_research_agent.runtime import DeepAgent
+from deep_research_agent.wiki.authz import WikiAuthorizer
+from deep_research_agent.wiki.backend import WikiBackend
+from deep_research_agent.wiki.tools import make_wiki_toolset
 
 __all__ = ["WikiCoordinator"]
 

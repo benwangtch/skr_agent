@@ -16,10 +16,10 @@ from pathlib import Path
 
 import pytest
 
-from skr_agent.config.mcp import MCP
-from skr_agent.mcp import load_mcp_tools, make_mcp_toolset, mcp_toolset_from_config
-from skr_agent.protocol import AgentRequest, Principal
-from skr_agent.runtime import ToolContext
+from deep_research_agent.config.mcp import MCP
+from deep_research_agent.mcp import load_mcp_tools, make_mcp_toolset, mcp_toolset_from_config
+from deep_research_agent.protocol import AgentRequest, Principal
+from deep_research_agent.runtime import ToolContext
 
 SERVER = str(Path(__file__).parent / "mcp_fixture_server.py")
 ALICE = Principal(subject="alice", division="supply", roles=frozenset({"wiki.reader"}))
@@ -156,7 +156,7 @@ class TestAgainstARealServer:
     async def test_mcp_tools_reach_the_agent_surface_but_not_the_subagent(self):
         """MCP tools mount on the main agent only: nothing tells us which of
         them mutate state, and the investigator is read-only by construction."""
-        from skr_agent import build_mesh
+        from deep_research_agent import build_mesh
 
         root = Path(__file__).resolve().parent.parent
         toolset = await mcp_toolset_from_config(stdio_config())
@@ -170,7 +170,7 @@ class TestAgainstARealServer:
 
     async def test_the_agent_still_has_its_own_sources(self):
         """Adding MCP must not displace the built-in data sources."""
-        from skr_agent import build_mesh
+        from deep_research_agent import build_mesh
 
         root = Path(__file__).resolve().parent.parent
         toolset = await mcp_toolset_from_config(stdio_config())

@@ -1,7 +1,7 @@
 """The wire contract every agent in the mesh speaks.
 
 This module deliberately knows nothing about wiki, reports, or Claude. It is the
-one piece skr agent, its data sources, its serving layer, and (later) the
+one piece the agent, its data sources, its serving layer, and (later) the
 skills-sharing platform all depend on, so it must stay free of feature
 concepts — and it is what let the agent framework underneath be swapped
 without any of them changing.

@@ -25,8 +25,8 @@ from a2a.server.context import ServerCallContext
 from a2a.server.events import EventQueueLegacy
 from a2a.types import Message, Part, Role, SendMessageRequest, TaskState
 
-from skr_agent.protocol import AgentRequest, AgentResponse, Citation, Denied, Principal
-from skr_agent.serving.a2a import DeepAgentExecutor, build_agent_card
+from deep_research_agent.protocol import AgentRequest, AgentResponse, Citation, Denied, Principal
+from deep_research_agent.serving.a2a import DeepAgentExecutor, build_agent_card
 
 ALICE = Principal(subject="alice", division="supply", roles=frozenset({"wiki.reader"}))
 
@@ -112,7 +112,7 @@ class StubAgent:
 
 
 def executor(agent=None, *, authorizer=None, default_principal=None):
-    from skr_agent.serving.a2a import _default_principal_resolver
+    from deep_research_agent.serving.a2a import _default_principal_resolver
 
     agent = agent or StubAgent()
     resolver = _default_principal_resolver(authorizer, default_principal or ALICE)
@@ -330,26 +330,26 @@ class TestCancel:
 
 class TestAgentCard:
     def test_card_exposes_a_skill_per_registered_agent(self):
-        from skr_agent.mesh import AgentRegistry
-        from skr_agent.protocol import AgentSpec
+        from deep_research_agent.mesh import AgentRegistry
+        from deep_research_agent.protocol import AgentSpec
 
         async def handler(request):
             return AgentResponse(status="ok")
 
         registry = AgentRegistry()
-        registry.register(AgentSpec(name="skr_agent", description="d1", handler=handler))
+        registry.register(AgentSpec(name="deep_research_agent", description="d1", handler=handler))
         registry.register(AgentSpec(name="wiki_ask", description="d2", handler=handler))
 
         card = build_agent_card(
-            StubAgent(name="skr_agent"), url="http://localhost:8000/", registry=registry
+            StubAgent(name="deep_research_agent"), url="http://localhost:8000/", registry=registry
         )
-        assert {s.id for s in card.skills} == {"skr_agent", "wiki_ask"}
+        assert {s.id for s in card.skills} == {"deep_research_agent", "wiki_ask"}
 
     def test_card_falls_back_to_the_bare_agent_with_no_registry(self):
-        agent = StubAgent(name="skr_agent", description="deep research agent")
+        agent = StubAgent(name="deep_research_agent", description="deep research agent")
         card = build_agent_card(agent, url="http://localhost:8000/")
-        assert [s.id for s in card.skills] == ["skr_agent"]
-        assert card.name == "skr_agent"
+        assert [s.id for s in card.skills] == ["deep_research_agent"]
+        assert card.name == "deep_research_agent"
 
     def test_card_advertises_the_configured_url(self):
         """1.x replaced AgentCard.url with a supported_interfaces list."""
@@ -376,7 +376,7 @@ class TestThroughTheRealHandler:
     def app(self, agent=None):
         from fastapi.testclient import TestClient
 
-        from skr_agent.serving.a2a import build_a2a_app
+        from deep_research_agent.serving.a2a import build_a2a_app
 
         return TestClient(
             build_a2a_app(agent or StubAgent(), url="http://test/", default_principal=ALICE)

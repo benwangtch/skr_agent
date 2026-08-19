@@ -31,7 +31,7 @@ import asyncio
 import logging
 from pathlib import Path
 
-from skr_agent.serving import run
+from deep_research_agent.serving import run
 
 ROOT = Path(__file__).resolve().parent.parent
 

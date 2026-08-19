@@ -1,4 +1,4 @@
-"""MCP servers as another data source for skr agent.
+"""MCP servers as another data source for the research agent.
 
 An MCP server is a peer of the BOM, the news feed, and the wiki: a place the
 agent can go to find things out. Its tools arrive already shaped as LangChain
@@ -36,10 +36,10 @@ from typing import Any, Sequence
 
 from langchain_core.tools import BaseTool, StructuredTool
 
-from skr_agent.config import get_mcp
-from skr_agent.config.mcp import MCP
-from skr_agent.protocol import Citation
-from skr_agent.runtime import ToolBundle, ToolContext, ToolsetFactory
+from deep_research_agent.config import get_mcp
+from deep_research_agent.config.mcp import MCP
+from deep_research_agent.protocol import Citation
+from deep_research_agent.runtime import ToolBundle, ToolContext, ToolsetFactory
 
 log = logging.getLogger(__name__)
 

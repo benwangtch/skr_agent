@@ -16,12 +16,12 @@ from pathlib import Path
 
 import uvicorn
 
-from skr_agent.assembly import build_mesh
-from skr_agent.mcp import mcp_toolset_from_config
-from skr_agent.principals import service_principal
-from skr_agent.protocol import Budget
-from skr_agent.serving.a2a import build_a2a_app
-from skr_agent.serving.scheduler import ScheduledJob, Scheduler
+from deep_research_agent.assembly import build_mesh
+from deep_research_agent.mcp import mcp_toolset_from_config
+from deep_research_agent.principals import service_principal
+from deep_research_agent.protocol import Budget
+from deep_research_agent.serving.a2a import build_a2a_app
+from deep_research_agent.serving.scheduler import ScheduledJob, Scheduler
 
 log = logging.getLogger(__name__)
 
@@ -64,7 +64,7 @@ async def run(
     until either one stops (normally: never — this is a foreground service)."""
     # MCP discovery is a network round trip, so it happens once here rather
     # than per request. No MCP configured -> None -> the agent's surface is
-    # unchanged. See skr_agent.mcp.
+    # unchanged. See deep_research_agent.mcp.
     mcp_toolset = await mcp_toolset_from_config()
     mesh = build_mesh(
         fixtures=fixtures,

@@ -2,7 +2,7 @@
 
 These call the wiki tool functions directly and run without API credentials —
 they test the seam, not the model. Tools are built through
-``make_wiki_toolset``, the same factory every caller (skr agent, the optional
+``make_wiki_toolset``, the same factory every caller (the research agent, the optional
 wiki_ask) goes through, so a rule verified here holds everywhere.
 """
 
@@ -10,12 +10,12 @@ from __future__ import annotations
 
 import pytest
 
-from skr_agent.principals import service_principal, user_principal
-from skr_agent.protocol import AgentRequest, Denied
-from skr_agent.runtime import ToolContext
-from skr_agent.wiki.authz import EXEC_NAMESPACE, WikiAuthorizer
-from skr_agent.wiki.backend import InMemoryWikiBackend, RawReport, WikiPage
-from skr_agent.wiki.tools import build_wiki_tools
+from deep_research_agent.principals import service_principal, user_principal
+from deep_research_agent.protocol import AgentRequest, Denied
+from deep_research_agent.runtime import ToolContext
+from deep_research_agent.wiki.authz import EXEC_NAMESPACE, WikiAuthorizer
+from deep_research_agent.wiki.backend import InMemoryWikiBackend, RawReport, WikiPage
+from deep_research_agent.wiki.tools import build_wiki_tools
 
 
 def reader(division="supply") -> "Principal":

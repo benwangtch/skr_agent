@@ -6,8 +6,8 @@ import json
 
 import pytest
 
-from skr_agent.mesh import AgentRegistry, agent_as_tool, agents_as_tools
-from skr_agent.protocol import (
+from deep_research_agent.mesh import AgentRegistry, agent_as_tool, agents_as_tools
+from deep_research_agent.protocol import (
     AgentRequest,
     AgentResponse,
     AgentSpec,
@@ -77,10 +77,10 @@ class TestPrincipalBinding:
         t = agent_as_tool(
             AgentSpec(name="probe", description="d", handler=handler),
             principal=ALICE,
-            parent="skr_agent",
+            parent="deep_research_agent",
         )
         await call(t, {"task": "go"})
-        assert seen[0].parent_agent == "skr_agent"
+        assert seen[0].parent_agent == "deep_research_agent"
 
 
 class TestRendering:
@@ -150,7 +150,7 @@ class TestCitationHarvest:
         t = agent_as_tool(
             spec_returning(response),
             principal=ALICE,
-            parent="skr_agent",
+            parent="deep_research_agent",
             on_response=lambda r: harvested.extend(r.citations),
         )
         await call(t, {"task": "t"})
@@ -173,12 +173,12 @@ class TestRegistry:
         tools = agents_as_tools(
             [
                 spec_returning(AgentResponse(status="ok"), name="wiki_ask"),
-                spec_returning(AgentResponse(status="ok"), name="skr_agent"),
+                spec_returning(AgentResponse(status="ok"), name="deep_research_agent"),
             ],
             principal=ALICE,
             parent="caller",
         )
-        assert [t.name for t in tools] == ["wiki_ask", "skr_agent"]
+        assert [t.name for t in tools] == ["wiki_ask", "deep_research_agent"]
 
 
 class TestBudget:
@@ -189,11 +189,11 @@ class TestBudget:
 
     def test_delegate_carries_principal_and_trace(self):
         request = AgentRequest(principal=ALICE, task="parent task", budget=Budget(max_turns=10))
-        child = request.delegate("child task", agent="skr_agent", max_turns=4)
+        child = request.delegate("child task", agent="deep_research_agent", max_turns=4)
         assert child.principal is ALICE
         assert child.trace_id == request.trace_id
         assert child.budget.max_turns == 4
-        assert child.parent_agent == "skr_agent"
+        assert child.parent_agent == "deep_research_agent"
 
 
 class TestPrincipalHygiene:

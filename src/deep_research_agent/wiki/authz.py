@@ -22,7 +22,7 @@ from __future__ import annotations
 import logging
 from dataclasses import dataclass, field
 
-from skr_agent.protocol import Denied, Principal
+from deep_research_agent.protocol import Denied, Principal
 
 log = logging.getLogger(__name__)
 
