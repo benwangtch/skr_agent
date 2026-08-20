@@ -53,6 +53,26 @@ uv run python -c "from deep_research_agent.config import get_llm; l=get_llm(); p
 
 ---
 
+## 1.5 設定檢查（跑真的東西之前先做這個）
+
+一個指令看完 LLM / MCP / skills 三層設定，**不花 token**：
+
+```bash
+uv run python examples/check_setup.py
+```
+
+它會印出 provider、base_url、model、金鑰有沒有設、每個 MCP server 連不連得上以及它給了哪些 tool、載了哪些 skill、還有哪些 skill 放在資料夾裡但沒被載入。有問題就 exit code 1，所以也可以拿來當部署前的 gate。
+
+**設定看起來對 ≠ endpoint 真的活著。** 要真的打一次模型（花費可忽略，但這是唯一能證明 base_url + 金鑰真的能用的方法）：
+
+```bash
+uv run python examples/check_setup.py --llm
+```
+
+MCP 連不上時預設只印一行結論，加 `-v` 才會印底層的例外（httpx / anyio 那一長串 traceback 在這裡只會蓋掉重點）。
+
+---
+
 ## 2. 跑單元測試（不花錢、不用金鑰）
 
 ```bash
@@ -236,19 +256,18 @@ MCP_TOKEN=內部服務發的憑證
 **先確認 tool 真的載得到，不必叫模型、不花 token：**
 
 ```bash
-uv run python -c "
-import asyncio; from deep_research_agent.mcp import load_mcp_tools
-for s, t in asyncio.run(load_mcp_tools()):
-    print(f'{s}: {t.name} — {t.description[:70]}')
-"
+uv run python examples/check_setup.py
 ```
 
-沒有輸出代表兩種可能，要分清楚：
+MCP 那一段預期看到：
 
-| 現象 | 意思 | 怎麼辦 |
-|---|---|---|
-| 完全沒輸出，也沒有 log | `MCP_*` 沒設到，`connections()` 是空的 | 檢查 `.env` 有沒有被讀到：`uv run python -c "from deep_research_agent.config import get_mcp; print(get_mcp().connections())"` |
-| log 有 `mcp.load_failed` | 有設定但連不上／認證失敗 | 看那行 exception。連不上是**跳過**不是致命錯，所以 agent 還是會起來，只是少了那些 tool |
+```
+MCP
+      internal: streamable_http -> https://mcp.internal.corp/mcp (with token)
+  [ok] internal: 3 tool(s) -- get_supplier_risk, list_audits, lookup_contract
+```
+
+看到 `[!!] could not connect, or it exposed no tools` 就加 `-v` 看底層錯誤（URL 錯？token 被拒？host 不通？）。看到 `[--] no MCP server configured` 代表 `.env` 根本沒被讀到——確認 `.env` 在 repo 根目錄、變數名沒打錯。
 
 **接著跑一次真的 agent**，確認模型看得到、也會用：
 

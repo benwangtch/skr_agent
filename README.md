@@ -106,6 +106,9 @@ The test suite needs no credentials at all.
 ## Run it
 
 ```bash
+uv run python examples/check_setup.py                       # verify config before spending tokens
+uv run python examples/check_setup.py --llm                 # ...and prove the model endpoint works
+
 uv run python examples/run_report.py --out report.md        # user-triggered; --out saves the published report
 uv run python examples/run_report.py --scheduled            # service account: cross-division, exec roll-up
 uv run python examples/run_report.py --dry-run              # research only
