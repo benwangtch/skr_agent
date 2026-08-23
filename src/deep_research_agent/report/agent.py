@@ -94,6 +94,30 @@ read-only with respect to the *wiki* — the boundary that carries authorization
 — not with respect to the scratchpad, which the investigator is meant to
 write to."""
 
+GENERAL_PURPOSE_TOOLS = (
+    "list_bom_companies",
+    "get_bom_company",
+    "search_news",
+    "fetch_article",
+    "wiki_search",
+    "wiki_read_page",
+)
+"""Tools for the ``general-purpose`` subagent — every read tool, no write tool.
+
+``deepagents`` auto-inserts a ``general-purpose`` subagent when the caller does
+not declare one, and that auto-inserted version **inherits the main agent's
+entire tool list, including ``wiki_write_page``**. That silently defeats two
+invariants this agent is built on: that only the top-level agent publishes, and
+that nothing reaches the wiki without passing the fact-checker first.
+
+So we declare it ourselves, which overrides the automatic one. The capability
+is worth keeping — delegating an arbitrary sub-question to a fresh context
+window is genuinely useful for open-ended research — it just must not be able
+to publish.
+
+Same explicit-allowlist rule as ``INVESTIGATOR_TOOLS``: MCP tools are absent
+because nothing tells us which of them mutate state."""
+
 VERIFIER_TOOLS = (
     "fetch_article",
     "wiki_read_page",
@@ -242,6 +266,24 @@ the caller can tell "checked, clean" from "not checked".
 """
 
 
+GENERAL_PURPOSE_PROMPT = """\
+You handle a self-contained sub-question the lead agent delegated to you, in
+your own context window.
+
+Work it properly rather than guessing: use the tools you have, read sources in
+full before relying on them, and follow the same evidence rules as the rest of
+this system — distinguish "no signal found" from "nothing happened", attach a
+source to every factual claim, and say plainly what you could not check.
+
+Write anything long to a file and reply with a short summary plus the path.
+Your reply goes into the lead agent's context, so keep it tight.
+
+You cannot publish. If the work you were given implies publishing, do the
+research and hand it back — say so in your reply rather than looking for
+another way to do it.
+"""
+
+
 VERIFIER_PROMPT = """You are a fact-checker. You are given a draft report and the sources it
 claims to rest on. You do not write reports and you do not do new research.
 
@@ -296,10 +338,25 @@ def build_deep_research_agent(
     _warn_about_unloaded_skills(project_root, resolved_skills)
 
     def subagents(ctx: ToolContext, tools: dict[str, BaseTool]) -> list[dict[str, Any]]:
-        # Read-only by construction: the investigator is handed a subset that
-        # simply does not contain the write tool, so it cannot publish even if
-        # it decides it should.
+        # Every subagent here is read-only with respect to the wiki: each is
+        # handed a subset that simply does not contain the write tool, so it
+        # cannot publish even if it decides it should.
+        #
+        # `general-purpose` MUST stay in this list. deepagents inserts its own
+        # version when we do not, and that one inherits every tool the main
+        # agent has -- wiki_write_page included. See GENERAL_PURPOSE_TOOLS.
         return [
+            {
+                "name": "general-purpose",
+                "description": (
+                    "Investigates a self-contained sub-question in its own "
+                    "context window and reports back. Use it to keep a long "
+                    "detour out of your own context. It can research but not "
+                    "publish."
+                ),
+                "system_prompt": GENERAL_PURPOSE_PROMPT,
+                "tools": [tools[n] for n in GENERAL_PURPOSE_TOOLS if n in tools],
+            },
             {
                 "name": "company-investigator",
                 "description": (

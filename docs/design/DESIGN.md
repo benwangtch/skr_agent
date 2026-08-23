@@ -107,6 +107,16 @@ skill 資料夾是 `skills/`（不是 `.claude/skills/`——那是這個專案�
 
 一個容易誤解的地方：`company-investigator` 「建構上唯讀」指的是**對 wiki 唯讀**（拿不到 `wiki_write_page`，那才是有授權意義的邊界）。它對虛擬檔案系統一直有寫入權——`deepagents` 不管 `tools` 給什麼，都會給每個 subagent 一份 `FilesystemMiddleware`。
 
+### 4.1b 三個 subagent，沒有一個能發布
+
+`general-purpose` / `company-investigator` / `fact-checker`，各自拿一份明確白名單，**都不含 `wiki_write_page`**。只有頂層 agent 能發布，所以 §4.2 的查核關卡繞不過去。
+
+`general-purpose` 是刻意保留的：把一個獨立的子問題丟進一個乾淨的 context window 去查，對開放式研究很有用——模型可以自己寫指示、自己決定要委派什麼。它只是不能發布。
+
+**這一段是修正過的。** `deepagents` 在呼叫端沒有宣告同名 subagent 時，會**自動插入一個 `general-purpose`，而它繼承主 agent 的全部 tool——包含 `wiki_write_page`**。於是「只有頂層 agent 能發布」跟「發布前必過 fact-checker」兩個不變式同時被破掉，而當時的測試只檢查我們自己宣告的清單，看不到框架加的那個，所以一直是綠的。現在我們自己宣告 `general-purpose`（覆蓋掉自動的那個），測試也改成從 `SubAgentMiddleware` 實際收到的清單去驗——框架未來再自動加什麼，會被抓到。
+
+**`report/agent.py` 的 `subagents()` 裡不能拿掉 `general-purpose`**：拿掉它，框架就會把有寫入權的那個放回來。
+
 ### 4.2 發布前必過 fact-checker
 
 Deep research 最常見的失敗不是查不到，是**寫出一句看起來合理、但沒有任何來源真的這樣說的話**。
@@ -148,7 +158,8 @@ Deep research 最常見的失敗不是查不到，是**寫出一句看起來合�
 │                   wiki_write_page      ← 唯一有授權模型的來源    │
 │  MCP server(s)    你設定的任何 tool（預設無）  ← 身份不傳，見 5.5  │
 │                                                              │
-│  subagents: company-investigator（唯讀）、fact-checker（唯讀）  │
+│  subagents: general-purpose / company-investigator /          │
+│             fact-checker —— 三個都拿不到 wiki_write_page        │
 └─────────────────────────────────────────────────────────────┘
 ```
 
@@ -325,10 +336,10 @@ await asyncio.gather(
 ## 8. 測試策略
 
 ```
-187 個測試，全部不需要金鑰、不呼叫模型
+191 個測試，全部不需要金鑰、不呼叫模型
   test_wiki_authz.py  32   namespace 授權、clearance、aggregation leak
   test_a2a_server.py  32   executor 生命週期 + 6 個走真 handler/HTTP 的整合測試
-  test_wiring.py      50   tool 清單、subagent 邊界、deep research 結構、報告取回、skill 載入、import 風格
+  test_wiring.py      54   tool 清單、subagent 邊界、deep research 結構、報告取回、skill 載入、import 風格
   test_config.py      22   provider 預設、env 覆蓋、chat model 形狀
   test_scheduler.py   19   cron 時序、失敗隔離
   test_mcp.py         17   設定解析、降級、對真的 MCP server 載入/呼叫/citation

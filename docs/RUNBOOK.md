@@ -22,7 +22,7 @@ fixtures/                              4 家公司、5 頁 wiki（namespace: sup
 examples/
   run_report.py                        單次執行 agent（掃描或單一提問）
   run_service.py                       同時跑 A2A server + 排程
-tests/                                 187 個測試，7 個檔案，全部不需要金鑰
+tests/                                 191 個測試，7 個檔案，全部不需要金鑰
 ```
 
 ---
@@ -76,7 +76,7 @@ MCP 連不上時預設只印一行結論，加 `-v` 才會印底層的例外（h
 ## 2. 跑單元測試（不花錢、不用金鑰）
 
 ```bash
-uv run pytest              # 187 個測試，約 3 秒
+uv run pytest              # 191 個測試，約 3 秒
 uv run pytest -q tests/test_wiki_authz.py     # 只跑某個檔案
 uv run pytest -k aggregation                  # 只跑名字符合的測試
 ```
@@ -85,7 +85,7 @@ uv run pytest -k aggregation                  # 只跑名字符合的測試
 |---|---|
 | `test_wiki_authz.py`（32） | namespace 授權、clearance-gated namespace、aggregation leak 檢查 |
 | `test_mesh.py`（15） | agent-as-tool 的 principal 綁定、citation 傳遞、拒絕處理 |
-| `test_wiring.py`（50） | 每個 agent 的 tool 清單、沒有 subagent 能發布、fact-checker 沒有 search tool、scratchpad/停止條件/矛盾處理有進 prompt、import 風格 |
+| `test_wiring.py`（54） | 每個 agent 的 tool 清單、沒有 subagent 能發布、fact-checker 沒有 search tool、scratchpad/停止條件/矛盾處理有進 prompt、import 風格 |
 | `test_config.py`（22） | LLM config 的 provider 預設值、env var 覆蓋、chat model 建構 |
 | `test_scheduler.py`（19） | cron 排程時序、job 失敗互不影響、hook 觸發 |
 | `test_mcp.py`（17） | MCP 設定解析、連不上時的降級、對真的 MCP server 載 tool／呼叫／記 citation |
@@ -376,7 +376,7 @@ print('prompt chars:', len(p))
 - A2A server 跟排程可以在同一個 process 穩定跑，外部呼叫走得通（3.6）
 - （若有設定）MCP tool 載得到、模型會用、而且留下 `mcp://` citation（3.7）
 
-這六步涵蓋了 `docs/design/DESIGN.md` §9 列出的「已知限制」之外的核心行為。**沒有自動化的 e2e 測試**（§2 的 187 個測試都用 stub，不叫真的模型）——這是刻意的，因為每次 CI 跑都花 token、還會因為模型輸出的隨機性讓測試不穩定。真要把 §3 這幾步自動化，做法是寫一支跑在 CI 之外（例如手動觸發或排程跑一次）的 smoke test script，判準改成寬鬆的（例如「有沒有 citations」而不是「內容逐字符合」）——這份文件目前先提供人工跑過一遍的步驟，還沒做那支腳本。
+這六步涵蓋了 `docs/design/DESIGN.md` §9 列出的「已知限制」之外的核心行為。**沒有自動化的 e2e 測試**（§2 的 191 個測試都用 stub，不叫真的模型）——這是刻意的，因為每次 CI 跑都花 token、還會因為模型輸出的隨機性讓測試不穩定。真要把 §3 這幾步自動化，做法是寫一支跑在 CI 之外（例如手動觸發或排程跑一次）的 smoke test script，判準改成寬鬆的（例如「有沒有 citations」而不是「內容逐字符合」）——這份文件目前先提供人工跑過一遍的步驟，還沒做那支腳本。
 
 ## 5. 常見卡住的地方
 

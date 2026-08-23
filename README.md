@@ -52,7 +52,8 @@ src/deep_research_agent/
   report/
     sources.py / tools.py   BOM + news data sources and their tools
     agent.py          ★ the agent itself: prompt, sources, subagents, rubric
-                        (company-investigator + fact-checker)
+                        (general-purpose + company-investigator + fact-checker;
+                         none of them can publish)
   serving/
     a2a.py            ★ serve any DeepAgent as a streaming A2A server
     scheduler.py       ★ cron-like recurring runs
@@ -142,14 +143,14 @@ scheduler survive running together).
 ## Test
 
 ```bash
-uv run pytest              # 187 tests, no credentials required
+uv run pytest              # 191 tests, no credentials required
 ```
 
 Coverage: namespace authorization, clearance-gated namespaces, the
 aggregation check that stops a cross-division sweep from landing somewhere
 too public (even when the write itself would otherwise be permitted), that a
 caller cannot widen its own scope, that publishing without provenance is
-rejected, that a subagent never receives the write tool, that the report
+rejected, that no subagent -- including the one the framework auto-inserts -- ever receives the write tool, that the report
 rubric really reaches the system prompt, LLM config and chat-model
 resolution, scheduler timing and failure isolation, and the A2A executor's
 principal resolution, streaming progress, task lifecycle and file artifacts —

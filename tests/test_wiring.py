@@ -518,3 +518,83 @@ class TestTheRepoSkillsFolder:
         with caplog.at_level(logging.WARNING):
             _warn_about_unloaded_skills(tmp_path, ["house-style"])
         assert "not loaded" not in caplog.text
+
+
+def subagents_registered_with_the_framework(agent, principal=ALICE):
+    """What deepagents *actually* ends up with, not what we declared.
+
+    The distinction is the whole point of this helper. `build_tools()` returns
+    the specs this repo writes; `create_deep_agent` can add its own on top --
+    and the one it adds inherits the main agent's entire tool list. Asserting
+    on our own list therefore cannot see a framework-inserted subagent, which
+    is exactly how a publishing-capable one went unnoticed.
+    """
+    import os
+    from unittest.mock import patch
+
+    import deepagents.middleware.subagents as sa
+
+    from deep_research_agent.config import reset_settings_cache
+
+    captured: dict = {}
+    original = sa.SubAgentMiddleware.__init__
+
+    def spy(self, *, backend, subagents, **kwargs):
+        captured["specs"] = subagents
+        return original(self, backend=backend, subagents=subagents, **kwargs)
+
+    # Building the graph constructs a chat-model client, which refuses to
+    # instantiate without a key. A dummy one is enough -- nothing here calls
+    # the model, so the suite stays credential-free.
+    env = {"LLM_PROVIDER": "custom", "LLM_BASE_URL": "http://127.0.0.1:1/v1",
+           "LLM_API_KEY": "test-only", "LLM_MODEL": "test-only"}
+
+    sa.SubAgentMiddleware.__init__ = spy
+    try:
+        with patch.dict(os.environ, env):
+            reset_settings_cache()
+            request = AgentRequest(principal=principal, task="t")
+            agent._build_graph(ToolContext(principal=principal, request=request))
+    finally:
+        sa.SubAgentMiddleware.__init__ = original
+        reset_settings_cache()
+    return captured.get("specs", [])
+
+
+class TestNoSubagentCanPublish:
+    """Checked against the framework's real subagent list.
+
+    deepagents auto-inserts a `general-purpose` subagent inheriting every tool
+    the main agent has -- `wiki_write_page` included -- unless we declare one
+    ourselves. That silently broke two invariants (only the top-level agent
+    publishes; nothing reaches the wiki without the fact-checker) while the
+    old test, which read our own declared list, stayed green.
+    """
+
+    def test_the_framework_registers_exactly_the_subagents_we_declare(self, mesh):
+        names = {s["name"] for s in subagents_registered_with_the_framework(mesh.report_agent)}
+        assert names == {"general-purpose", "company-investigator", "fact-checker"}
+
+    def test_no_registered_subagent_has_the_write_tool(self, mesh):
+        for spec in subagents_registered_with_the_framework(mesh.report_agent):
+            tools = {t.name for t in (spec.get("tools") or [])}
+            assert "wiki_write_page" not in tools, spec["name"]
+
+    def test_general_purpose_can_still_research(self, mesh):
+        """Restricting it must not make it useless -- delegating an open
+        sub-question to a fresh context window is worth keeping."""
+        specs = {s["name"]: s for s in subagents_registered_with_the_framework(mesh.report_agent)}
+        tools = {t.name for t in specs["general-purpose"]["tools"]}
+        assert {"search_news", "wiki_search", "fetch_article"} <= tools
+
+    def test_declaring_general_purpose_overrides_the_automatic_one(self, mesh):
+        """If our spec stopped taking effect, the auto-added one would come
+        back with full tools and this would fail."""
+        specs = {s["name"]: s for s in subagents_registered_with_the_framework(mesh.report_agent)}
+        ours = {t.name for t in specs["general-purpose"]["tools"]}
+        every_tool = {t.name for t in mesh.report_agent.build_tools(context_for(ALICE))[0]}
+        assert ours < every_tool, "general-purpose inherited everything -- ours was ignored"
+
+
+def context_for(principal):
+    return ToolContext(principal=principal, request=AgentRequest(principal=principal, task="t"))
