@@ -29,6 +29,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any, Sequence
 
+from deep_research_agent.core.references import ReferenceFormat
 from deep_research_agent.runtime import ToolsetFactory
 
 __all__ = ["ResearchDomain", "Specialist"]
@@ -77,3 +78,15 @@ class ResearchDomain:
     """Extra JSON-schema properties merged into the agent's input schema, so a
     scheduled caller can pass structured parameters (``tier``, ``region``)
     rather than encoding them in prose."""
+
+    reference_format: ReferenceFormat | None = None
+    """How this domain's output cites its sources, for ``check_references``.
+
+    ``None`` means "use the core default", which matches the shape the
+    ``incident-report`` rubric asks for. A domain whose deliverable is laid
+    out differently — a patent brief, a filing summary — supplies its own
+    rather than editing the core one, since the checker is otherwise going to
+    report every section of its output as unsourced.
+
+    ``build_research_agent(check_references=False)`` is the escape hatch for a
+    deployment with no citation convention at all."""

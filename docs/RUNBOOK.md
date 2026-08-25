@@ -28,7 +28,7 @@ src/deep_research_agent/
     serve.py                           同時跑 A2A server + 排程
     check.py                           花 token 前先驗設定（有問題 exit 1）
 fixtures/                              4 家公司、5 頁 wiki（namespace: supply / platform / shared）、4 份原始週報
-tests/                                 260 個測試，10 個檔案，全部不需要金鑰
+tests/                                 291 個測試，11 個檔案，全部不需要金鑰
 ```
 
 入口點在**套件裡面**不是 `examples/`——它們不是示範，是這個東西實際的跑法，而且容器要的是「裝好」不是「clone 下來」。四個指令共用一個 dispatcher：
@@ -98,7 +98,7 @@ MCP 連不上時預設只印一行結論，加 `-v` 才會印底層的例外（h
 ## 2. 跑單元測試（不花錢、不用金鑰）
 
 ```bash
-uv run pytest              # 260 個測試，約 18 秒
+uv run pytest              # 291 個測試，約 14 秒
 uv run pytest -q tests/test_wiki_authz.py     # 只跑某個檔案
 uv run pytest -k aggregation                  # 只跑名字符合的測試
 ```
@@ -108,6 +108,7 @@ uv run pytest -k aggregation                  # 只跑名字符合的測試
 | `test_wiki_authz.py`（32） | namespace 授權、clearance-gated namespace、aggregation leak 檢查 |
 | `test_mesh.py`（15） | agent-as-tool 的 principal 綁定、citation 傳遞、拒絕處理 |
 | `test_wiring.py`（55） | 每個 agent 的 tool 清單、沒有 subagent 能發布（兩種部署形態都驗）、fact-checker 沒有 search tool、scratchpad/停止條件/矛盾處理有進 prompt、import 風格 |
+| `test_references.py`（31） | 引用格式/形狀/grounding/宣告一致；**乾淨草稿不誤報**；格式可被 domain 覆寫 |
 | `test_cli.py`（25） | 四個入口都 import 得起來且 `--help` 能跑、project root/fixtures 的解析（含從 checkout 以外的目錄）、設定不全時給一行人話而不是 traceback |
 | `test_general_agent.py`（24） | 沒有 domain 也是完整形態、domain 只能加不能放寬規則、tool 能力宣告與 fail-closed 預設 |
 | `test_config.py`（22） | LLM config 的 provider 預設值、env var 覆蓋、chat model 建構 |
@@ -216,6 +217,38 @@ uv run python -m deep_research_agent report --ask "What happened with our suppli
 ```
 
 這句需要外部研究，應該會看到 `search_news` / `fetch_article` 出現。
+
+### 3.4b 引用檢查：確認捏造的引用真的會被抓
+
+這一步**不用花 token**，因為檢查本身是確定性的：
+
+```bash
+uv run python - <<'PY'
+import asyncio, deep_research_agent as d
+from deep_research_agent.runtime import ToolContext
+from deep_research_agent.protocol import AgentRequest
+
+p = d.user_principal('a','supply', roles={'wiki.reader'})
+ctx = ToolContext(principal=p, request=AgentRequest(principal=p, task='t'))
+m = d.build_mesh(fixtures='fixtures', project_root='.')
+by = {t.name: t for t in m.agent.build_tools(ctx)[0]}
+
+DRAFT = '''### Acme — critical
+- **What happened:** a fire.
+- **Sources:** supply/acme-semiconductor, https://invented.test/story
+'''
+
+async def main():
+    print(await by['check_references'].ainvoke({'content': DRAFT}))   # 什麼都沒讀過
+    await by['wiki_read_page'].ainvoke({'ref': 'supply/acme-semiconductor'})
+    print(await by['check_references'].ainvoke({'content': DRAFT}))   # 讀過一個了
+asyncio.run(main())
+PY
+```
+
+預期：第一次兩個 ref 都是 `ungrounded_reference`；第二次只剩 `https://invented.test/story` —— **因為那個真的沒被取回過**。這就是 grounding 檢查在做的事，而且不需要模型判斷。
+
+真的跑 agent 時（§3.1/§3.2），用 `-v` 確認 `check_references` 有出現在 tool 呼叫裡，而且是在 `wiki_write_page` **之前**。如果 agent 直接發布沒先檢查，是 `core/prompt.py` 的 `REFERENCES` 那段沒生效。
 
 ### 3.5b 沒有 domain 的通用 agent：使用者問任何事
 
@@ -450,7 +483,7 @@ print('prompt chars:', len(p))
 - A2A server 跟排程可以在同一個 process 穩定跑，外部呼叫走得通（3.6）
 - （若有設定）MCP tool 載得到、模型會用、而且留下 `mcp://` citation（3.7）
 
-這六步涵蓋了 `docs/design/DESIGN.md` §9 列出的「已知限制」之外的核心行為。**沒有自動化的 e2e 測試**（§2 的 260 個測試都用 stub，不叫真的模型）——這是刻意的，因為每次 CI 跑都花 token、還會因為模型輸出的隨機性讓測試不穩定。真要把 §3 這幾步自動化，做法是寫一支跑在 CI 之外（例如手動觸發或排程跑一次）的 smoke test script，判準改成寬鬆的（例如「有沒有 citations」而不是「內容逐字符合」）——這份文件目前先提供人工跑過一遍的步驟，還沒做那支腳本。
+這六步涵蓋了 `docs/design/DESIGN.md` §9 列出的「已知限制」之外的核心行為。**沒有自動化的 e2e 測試**（§2 的 291 個測試都用 stub，不叫真的模型）——這是刻意的，因為每次 CI 跑都花 token、還會因為模型輸出的隨機性讓測試不穩定。真要把 §3 這幾步自動化，做法是寫一支跑在 CI 之外（例如手動觸發或排程跑一次）的 smoke test script，判準改成寬鬆的（例如「有沒有 citations」而不是「內容逐字符合」）——這份文件目前先提供人工跑過一遍的步驟，還沒做那支腳本。
 
 ## 5. 常見卡住的地方
 

@@ -1,9 +1,17 @@
-"""The two subagents every research run gets, whatever the subject.
+"""The subagents every research run gets, whatever the subject.
 
-``general-purpose`` and ``fact-checker`` are core rather than domain-supplied
-because they are not about the subject at all: one is "work this branch in a
-context window I will throw away", the other is "check the draft against what
-it cites". A domain adds specialists on top; it never has to supply these.
+``general-purpose``, ``fact-checker`` and ``reference-checker`` are core
+rather than domain-supplied because none of them is about the subject: one is
+"work this branch in a context window I will throw away", one is "check the
+draft against what it cites", one is "work through a list of reference
+defects". A domain adds specialists on top; it never has to supply these.
+
+The two checkers answer different questions and neither substitutes for the
+other. ``fact-checker`` asks *does the source say this* — semantic, needs a
+model. ``reference-checker`` deals with *is a reference attached, in the
+agreed shape, pointing at something we actually retrieved* — which is
+mechanical, and is done by the ``check_references`` tool rather than by the
+subagent's judgement. See ``core/references.py``.
 
 ``general-purpose`` in particular **must** be declared here. ``deepagents``
 inserts its own when the caller does not, and that one inherits the main
@@ -23,8 +31,14 @@ from langchain_core.tools import BaseTool
 from deep_research_agent.capabilities import lookup_tools, read_only_tools, select_read_only
 from deep_research_agent.core.domain import Specialist
 from deep_research_agent.core.prompt import FINDINGS_DIR
+from deep_research_agent.core.reference_tools import REFERENCE_TOOL_NAME
 
-__all__ = ["core_subagents", "GENERAL_PURPOSE_PROMPT", "FACT_CHECKER_PROMPT"]
+__all__ = [
+    "core_subagents",
+    "GENERAL_PURPOSE_PROMPT",
+    "FACT_CHECKER_PROMPT",
+    "REFERENCE_CHECKER_PROMPT",
+]
 
 
 GENERAL_PURPOSE_PROMPT = f"""\
@@ -79,6 +93,45 @@ useless, because it will be trusted.\
 """
 
 
+REFERENCE_CHECKER_PROMPT = """\
+You are given a draft whose references have already been checked mechanically
+by the `check_references` tool, and a list of the defects it found. Your job is
+to work through that list and hand back a specific fix for each one — not to
+re-do the detection.
+
+Start by running `check_references` on the draft yourself, so you are working
+from the current list rather than a stale one.
+
+**The tool is exact. You are not.** It parses the draft and compares every
+reference against what this run actually retrieved. Do not argue with a
+finding because the draft reads as though it is sourced, and do not decide a
+section "obviously" has a reference somewhere. The one thing worth your
+judgement is whether a violation is a parser artefact — a reference inside a
+code block or a table cell that the pattern read as prose. Say so explicitly
+when you think that is what happened, and say why.
+
+For each defect, decide which of these applies and say so:
+
+- **Missing reference, recoverable** — the source was retrieved during this
+  run and just was not cited. Name the exact reference to add and where.
+- **Missing reference, unrecoverable** — nothing retrieved supports the claim.
+  The fix is to drop the claim, not to attach the nearest plausible source.
+  Say which sentence has to go.
+- **Ungrounded reference** — cited but never retrieved. This is the serious
+  one: it means the reference was written from memory. Say to remove it, and
+  whether a genuinely retrieved source could replace it.
+- **Parser artefact** — the draft is fine and the pattern misfired. Explain
+  which construct confused it.
+
+Use your lookup tools to confirm that a reference you propose adding really
+resolves. A proposed fix that does not resolve is worse than the defect.
+
+Write the full defect-by-defect analysis to a file and reply with a SHORT
+summary: how many defects, how many need a claim dropped, and the file path.
+Finish with an overall verdict of PASS (nothing left to fix) or REVISE.\
+"""
+
+
 def core_subagents(
     tools: Sequence[BaseTool],
     by_name: Mapping[str, BaseTool],
@@ -116,6 +169,25 @@ def core_subagents(
             "system_prompt": FACT_CHECKER_PROMPT,
         },
     ]
+
+    # Only when a reference format is in play. Without the tool this subagent
+    # would have nothing to work from and would be reduced to eyeballing the
+    # draft -- the exact thing its prompt tells it not to do.
+    if REFERENCE_TOOL_NAME in by_name:
+        specs.append({
+            "name": "reference-checker",
+            "description": (
+                "Works through the defects `check_references` found in a draft and "
+                "returns a specific fix for each. Delegate here when that tool "
+                "reports violations you need to work through; for a clean draft "
+                "the tool's own PASS is the whole answer and this costs a turn "
+                "for nothing."
+            ),
+            # Same lookup set as the fact-checker: it confirms that a
+            # reference it proposes adding actually resolves.
+            "tools": checker_tools,
+            "system_prompt": REFERENCE_CHECKER_PROMPT,
+        })
 
     for specialist in specialists:
         specs.append(

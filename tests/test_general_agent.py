@@ -63,7 +63,8 @@ def a_tool(name: str):
 class TestTheAgentRunsWithoutADomain:
     def test_it_builds_and_has_a_working_tool_surface(self, general):
         names, _ = surface(general.agent)
-        assert {"wiki_search", "wiki_read_page", "wiki_write_page"} == names
+        assert {"wiki_search", "wiki_read_page", "wiki_write_page",
+                "check_references"} == names
 
     def test_the_research_machinery_is_present_anyway(self, general):
         """The parts that make this good at research are not the domain's."""
@@ -74,9 +75,9 @@ class TestTheAgentRunsWithoutADomain:
         assert "disagree" in prompt
         assert "one source" in prompt or "single source" in prompt
 
-    def test_both_core_subagents_exist(self, general):
+    def test_the_core_subagents_exist(self, general):
         _, subs = surface(general.agent)
-        assert set(subs) == {"general-purpose", "fact-checker"}
+        assert set(subs) == {"general-purpose", "fact-checker", "reference-checker"}
 
     def test_the_prompt_says_nothing_about_supply_chains(self, general):
         prompt = general.agent._full_system_prompt().lower()
@@ -126,7 +127,8 @@ class TestCapabilitiesDecideWhoGetsWhat:
     def test_the_fact_checker_gets_lookups_but_not_searches(self, domained):
         _, subs = surface(domained.agent)
         tools = {t.name for t in subs["fact-checker"]["tools"]}
-        assert {"wiki_read_page", "fetch_article", "get_bom_company"} == tools
+        assert {"wiki_read_page", "fetch_article", "get_bom_company",
+                "check_references"} == tools
 
     def test_the_researcher_gets_every_read_only_tool(self, domained):
         names, subs = surface(domained.agent)
@@ -255,7 +257,9 @@ class TestAddingANewDomain:
         assert "jurisdiction" in mesh.agent.as_spec().input_schema["properties"]
 
         _, subs = surface(mesh.agent)
-        assert set(subs) == {"general-purpose", "fact-checker", "claim-reader"}
+        assert set(subs) == {
+            "general-purpose", "fact-checker", "reference-checker", "claim-reader"
+        }
 
     def test_a_domain_is_immutable_so_it_can_be_shared(self):
         domain = ResearchDomain(name="x")

@@ -577,7 +577,9 @@ class TestNoSubagentCanPublish:
 
     def test_the_framework_registers_exactly_the_subagents_we_declare(self, mesh):
         names = {s["name"] for s in subagents_registered_with_the_framework(mesh.agent)}
-        assert names == {"general-purpose", "company-investigator", "fact-checker"}
+        assert names == {
+            "general-purpose", "company-investigator", "fact-checker", "reference-checker"
+        }
 
     def test_no_registered_subagent_has_the_write_tool(self, mesh):
         for spec in subagents_registered_with_the_framework(mesh.agent):
@@ -604,7 +606,9 @@ class TestNoSubagentCanPublish:
         likely to be assembled somewhere this list was never reviewed."""
         general = build_mesh(fixtures=ROOT / "fixtures", project_root=ROOT, domain=None)
         specs = subagents_registered_with_the_framework(general.agent)
-        assert {s["name"] for s in specs} == {"general-purpose", "fact-checker"}
+        assert {s["name"] for s in specs} == {
+            "general-purpose", "fact-checker", "reference-checker"
+        }
         for spec in specs:
             assert "wiki_write_page" not in {t.name for t in (spec.get("tools") or [])}
 

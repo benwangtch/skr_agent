@@ -45,6 +45,7 @@
 | subagent 拿得到哪些 tool | 由 **tool 自己宣告能力**決定，不是寫死名單 | 掛了 domain 和 MCP 之後，名單永遠不可能完整——§3.5 |
 | 模型怎麼接 | LangChain `BaseChatModel`，由 `config/llm.py` 建 | 不綁 wire protocol，內部 gateway 有 OpenAI-compatible endpoint 就能接——§6 |
 | 怎麼讓它擅長 deep research | scratchpad + 發布前 fact-checker + 停止條件 + 矛盾攤開 | 框架只給 loop 和委派，研究品質是這四個決定堆出來的——§4 |
+| 引用格式怎麼檢查 | **確定性 parser**，不是模型；捏造的引用可判定 | 逐項清點是模型的弱項；citation sink 讓 grounding 變成事實比對——§4.1c |
 | 報告規範怎麼載入 | inline 進 system prompt，不用 `skills=` 的按需載入 | 必須遵守的規範不該靠模型記得去讀檔——§3.3 |
 | wiki 是 agent 還是 tool | **一組掛授權的 tools**，不是 agent | 它要解決的是授權，授權是規則查表不是推理——§5.2 |
 | 定期報告 vs 使用者觸發 | 同一個 agent，不同 `Principal` | 差別是誰在問，不是問什麼——§5.3 |
@@ -109,10 +110,12 @@ skill 資料夾是 `skills/`（不是 `.claude/skills/`——那是這個專案�
 
 ```
 core/          跟主題無關的部分
-  prompt.py      研究方法、證據紀律、停止條件、查核、發布規則（分段組裝）
-  subagents.py   general-purpose + fact-checker
-  domain.py      ResearchDomain / Specialist 兩個 dataclass
-  agent.py       build_research_agent(domain=None)
+  prompt.py         研究方法、證據紀律、停止條件、查核、引用、發布（分段組裝）
+  subagents.py      general-purpose + fact-checker + reference-checker
+  references.py     引用檢查的純函式（格式/形狀/grounding/宣告）——§4.1c
+  reference_tools.py  把它綁到本次執行的 citation 記錄，包成 tool
+  domain.py         ResearchDomain / Specialist 兩個 dataclass
+  agent.py          build_research_agent(domain=None)
 
 capabilities.py  tool 能力宣告（§3.5），跟 protocol.py 同層的葉子模組
 
@@ -122,7 +125,7 @@ domains/
 
 **判準：這段文字換成專利研究、法規研究、事故調查，還成不成立？** 成立的放 core，不成立的放 domain。「讀完再引用」「兩個來源打架要攤開」到處都成立；「別名很重要，事故常掛在母公司名下」只在供應鏈成立。
 
-一個 `ResearchDomain` 只提供五樣東西，全部是**加法**：
+一個 `ResearchDomain` 只提供六樣東西，全部是**加法**：
 
 | 欄位 | 加了什麼 |
 |---|---|
@@ -130,6 +133,7 @@ domains/
 | `toolsets` | 這個主題自己的資料來源 |
 | `specialists` | 懂這個主題子任務形狀的 subagent |
 | `skills` | 輸出必須遵守的 rubric |
+| `reference_format` | 這個主題的引用長什麼樣（`None` = 用 core 預設）——§4.1c |
 | `inputs` | agent input schema 多出來的結構化欄位（排程呼叫端用） |
 
 **domain 不能放寬任何規則。** specialist 宣告要哪些 tool 只是「請求」不是「授權」——core 會再過一次唯讀檢查（§3.5），要到寫入 tool 的會被丟掉並 log。有測試直接建一個貪心 domain 驗這件事。
@@ -186,6 +190,35 @@ mutating(tool)   # 會改外面的狀態            → 只有頂層 agent
 **這一段是修正過的。** `deepagents` 在呼叫端沒有宣告同名 subagent 時，會**自動插入一個 `general-purpose`，而它繼承主 agent 的全部 tool——包含 `wiki_write_page`**。於是「只有頂層 agent 能發布」跟「發布前必過 fact-checker」兩個不變式同時被破掉，而當時的測試只檢查我們自己宣告的清單，看不到框架加的那個，所以一直是綠的。現在我們自己宣告 `general-purpose`（覆蓋掉自動的那個），測試也改成從 `SubAgentMiddleware` 實際收到的清單去驗——框架未來再自動加什麼，會被抓到。**`domain=None` 的形態也有同一組驗證**，因為那是最可能在沒人 review 這份清單的地方被組起來的形態。
 
 **`core/subagents.py` 的 `core_subagents()` 裡不能拿掉 `general-purpose`**：拿掉它，框架就會把有寫入權的那個放回來。
+
+### 4.1c 引用檢查是 parser，不是模型
+
+`fact-checker`（§4.2）問的是「來源**有沒有這樣說**」——語意判斷，需要模型。另一個問題是「引用**有沒有照格式附上、而且是真的**」，那是解析，交給模型是錯的。
+
+差別在失敗模式。叫模型確認一份 20 家公司的報告每一段都有附來源，是**逐項清點**任務——它會安靜地漏掉一個，而且每次漏的不一樣。parser 一個都不漏、零成本、還會直接告訴你在第幾行。
+
+`check_references` 工具（`core/references.py`）四類檢查：
+
+| 檢查 | 內容 |
+|---|---|
+| format | 有 claim 的段落到底有沒有 sources 行；`— none` 的段落改要求 `**Queries run:**` |
+| shape | 每個 ref 解析得出 URL / `namespace/slug` / `rpt-...` 其中一種 |
+| **grounding** | **每個被引用的 ref，這次執行真的取回過嗎** |
+| declaration | 發布宣告的 `source_refs` 跟內文引用兩邊對得起來（雙向） |
+
+**grounding 是這個 repo 才做得到的。** tool 層本來就會替讀到的每樣東西記一筆 `Citation`，所以沒出現在那份記錄裡的 ref = 沒讀過 = 是編的。rubric 第 3 條「不准引用沒 fetch 過的文章」原本只是 prompt 裡的一句話，現在是**可判定的**。
+
+而且它涵蓋委派：citation sink 在 lead 與 subagent 之間共用，所以 investigator `fetch_article` 拿到的東西算 grounded，lead 起草時憑印象寫出來的不算。
+
+`retrieved` 的 `None` 和 `[]` 是**不同的主張**，故意的：`None` = 沒有取回記錄可比對（外部文件），跳過檢查；`[]` = 這次執行什麼都沒讀，那draft 裡每個 ref 都是編的。兩者混為一談，會讓「全部引用都捏造」這個最該抓的情況剛好變成靜默通過。
+
+**誤報成本高於漏報。** 會被忽略的檢查等於沒有檢查，所以：Findings 段落以外的散文不要求引用（「本報告涵蓋四家供應商」不需要出處）；取回了但沒在內文引用的 ref **不算**殘留（讀 wiki 頁面會連帶回傳它的 raw reports，宣告那些正是 provenance 規則要的）；殘留只降級成 warning，不擋發布。
+
+`reference-checker` subagent 做的是**分流不是偵測**：工具回 PASS 時 lead 一行帶過、零額外 model pass；有 violation 才委派，因為幾十條清單加上重讀來源會塞爆 lead 的 context。它的 prompt 明講「工具是精確的、你不是」——唯一值得它判斷的是某條 violation 是不是 parser 撞到表格或 code block 的誤判。
+
+格式可定義：`ReferenceFormat` 預設對齊 `incident-report` rubric，domain 用 `reference_format` 覆寫。完全沒有引用慣例的部署用 `build_research_agent(check_references=False)` 整組關掉——格式不對的 checker 會把每一段都報成沒來源，那比沒有還糟。
+
+實測（`rpt-supply-2026-W28` 有大寫 W）：第一版 pattern 只收小寫，**這個 repo 每一個 raw report id 它都看不到**。測試抓到了。
 
 ### 4.2 發布前必過 fact-checker
 
@@ -434,7 +467,7 @@ await asyncio.gather(
 ## 8. 測試策略
 
 ```
-260 個測試，全部不需要金鑰、不呼叫模型
+291 個測試，全部不需要金鑰、不呼叫模型
   test_wiring.py      55   tool 清單、subagent 邊界、deep research 結構、報告取回、skill 載入、import 風格
   test_wiki_authz.py  32   namespace 授權、clearance、aggregation leak
   test_a2a_server.py  32   executor 生命週期 + 6 個走真 handler/HTTP 的整合測試
@@ -445,6 +478,7 @@ await asyncio.gather(
   test_mcp.py         17   設定解析、降級、對真的 MCP server 載入/呼叫/citation
   test_mesh.py        15   agent-as-tool 的 principal 綁定、citation 傳遞
   test_cli.py         25   四個入口都 import 得起來、path 解析（含 checkout 外）、啟動前的設定檢查
+  test_references.py  31   引用格式/形狀/grounding/宣告一致；乾淨草稿不誤報
 ```
 
 三個刻意的選擇：

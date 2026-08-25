@@ -27,6 +27,8 @@ from langchain_core.tools import BaseTool
 
 from deep_research_agent.core.domain import ResearchDomain
 from deep_research_agent.core.prompt import research_prompt
+from deep_research_agent.core.reference_tools import reference_toolsets
+from deep_research_agent.core.references import DEFAULT_FORMAT
 from deep_research_agent.core.subagents import core_subagents
 from deep_research_agent.runtime import DeepAgent, ToolContext, ToolsetFactory
 from deep_research_agent.wiki.authz import WikiAuthorizer
@@ -110,6 +112,7 @@ def build_research_agent(
     model: str | None = None,
     max_turns: int = 60,
     publishable: bool = True,
+    check_references: bool = True,
     extra_toolsets: Sequence[ToolsetFactory] = (),
 ) -> DeepAgent:
     """Wire up the research agent.
@@ -130,7 +133,19 @@ def build_research_agent(
     ``publishable=False`` drops the write tool *and* the prompt section that
     describes it, so a read-only deployment does not spend turns attempting a
     call it cannot make.
+
+    ``check_references=False`` does the same for the reference checker. Leave
+    it on unless the output genuinely has no citation convention — a checker
+    with the wrong format reports every section as unsourced, which is how a
+    useful check gets ignored. Prefer overriding the domain's
+    ``reference_format`` to turning it off.
     """
+    # A domain may define its own citation shape; None here means "off",
+    # which is why the flag and the domain's override are resolved together.
+    reference_format = None
+    if check_references:
+        reference_format = (domain.reference_format if domain else None) or DEFAULT_FORMAT
+
     skills = list(domain.skills) if domain else []
     skills += _env_skills(skills)
     if domain is not None:
@@ -152,10 +167,13 @@ def build_research_agent(
         name=AGENT_NAME,
         description=(domain.summary or DEFAULT_DESCRIPTION) if domain else DEFAULT_DESCRIPTION,
         system_prompt=research_prompt(
-            briefing=domain.briefing if domain else "", publishable=publishable
+            briefing=domain.briefing if domain else "",
+            publishable=publishable,
+            check_references=check_references,
         ),
         toolsets=[
             make_wiki_toolset(wiki_backend, wiki_authz, writable=publishable),
+            *reference_toolsets(reference_format),
             *(domain.toolsets if domain else ()),
             *extra_toolsets,
         ],

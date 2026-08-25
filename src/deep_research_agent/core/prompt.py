@@ -13,8 +13,9 @@ over — are subject-independent. Keeping them in one place is what lets a new
 domain be a folder of sources and a briefing, rather than a fork of a 200-line
 prompt that will drift.
 
-``PUBLISH`` is conditional: a prompt describing a tool the agent does not hold
-teaches it to hallucinate the call, and a read-only deployment is a real case.
+``PUBLISH`` and ``REFERENCES`` are conditional: a prompt describing a tool the
+agent does not hold teaches it to hallucinate the call, and both a read-only
+deployment and one with no citation convention are real cases.
 The fact-checker section is unconditional — the checker is built from whatever
 lookup tools exist, and every deployment mounts at least one source it can
 re-read.
@@ -22,7 +23,7 @@ re-read.
 
 from __future__ import annotations
 
-__all__ = ["research_prompt", "FINDINGS_DIR"]
+__all__ = ["research_prompt", "FINDINGS_DIR", "REFERENCES"]
 
 FINDINGS_DIR = "/findings"
 """Where subagents write their notes, and where the lead reads them back.
@@ -139,6 +140,33 @@ an unresolved REVISE, and do not resolve one by deleting the claim's citation
 """
 
 
+REFERENCES = """\
+# Check your references mechanically
+
+Before you finalise, run `check_references` on the full draft. When you are
+about to publish, pass the same `source_refs` you intend to publish with, so
+the body and the declared sources are cross-checked against each other.
+
+This is a parser, not an opinion. It knows what you actually retrieved during
+this run, so it catches the failure a careful read never does: a reference
+that looks right, reads right, and was never opened. Do not try to satisfy it
+by reasoning about your own draft — run it.
+
+If it returns PASS, you are done with references; say so in one line and move
+on. If it reports violations, hand the draft and its output to the
+`reference-checker` subagent, which works through them and returns a specific
+fix for each. Apply those fixes and run the tool again.
+
+Two of its findings have only one correct resolution, and it is not the
+convenient one:
+
+- **A claim nothing retrieved supports** is dropped, not re-attributed to the
+  nearest plausible source.
+- **A reference that was never retrieved** is removed. It was written from
+  memory. Replace it with something you actually read, or drop the claim.\
+"""
+
+
 PUBLISH = """\
 # Publishing
 
@@ -168,12 +196,17 @@ found, what it rests on, what you could not establish, and what needs a human.\
 """
 
 
-def research_prompt(*, briefing: str = "", publishable: bool = True) -> str:
+def research_prompt(
+    *, briefing: str = "", publishable: bool = True, check_references: bool = True
+) -> str:
     """Assemble the system prompt for one agent.
 
     ``briefing`` is a domain's section, inserted after the role so the model
     knows what it is looking at before it is told how to work. ``publishable``
-    drops the publishing rules for a deployment that holds no write tool.
+    drops the publishing rules for a deployment that holds no write tool, and
+    ``check_references`` drops the reference section for one with no citation
+    convention — in both cases because describing a tool the agent does not
+    hold teaches it to hallucinate the call.
     """
     parts = [ROLE]
     if briefing.strip():
@@ -183,6 +216,8 @@ def research_prompt(*, briefing: str = "", publishable: bool = True) -> str:
     parts.append(EVIDENCE)
     parts.append(STOPPING)
     parts.append(VERIFY)
+    if check_references:
+        parts.append(REFERENCES)
     if publishable:
         parts.append(PUBLISH)
     parts.append(CLOSING_PUBLISHED if publishable else CLOSING_DIRECT)
