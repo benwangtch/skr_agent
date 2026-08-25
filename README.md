@@ -135,6 +135,14 @@ name it in `SKILLS_ENABLED` — no code change, and no copy to drift from the
 original. If it belongs to this repo, drop `skills/<name>/SKILL.md` in and add
 the name to the domain's `skills`. RUNBOOK §3.8, `DESIGN.md` §3.3.
 
+A domain can define its own citation format. The supply-chain pack does: every
+entry on a `Sources:` line is a markdown link — news to the article URL, a wiki
+page to its route — and raw report ids stay out of the page. It ships a
+`format_reference` tool that builds the exact markdown from the loaded
+document, so the agent pastes rather than guesses, and its extra rules merge
+into the same `check_references` call rather than becoming a second gate.
+`DESIGN.md` §4.1c, `wiki/routes.py` for the (mocked) routing.
+
 To add a **new subject** (patents, incidents, regulatory filings): add a
 package under `domains/` that returns a `ResearchDomain` — a briefing, its
 sources, any specialist subagents, a rubric. Nothing in `core/` changes; if
@@ -220,7 +228,7 @@ scheduler survive running together).
 ## Test
 
 ```bash
-uv run pytest              # 301 tests, no credentials required
+uv run pytest              # 326 tests, no credentials required
 ```
 
 Coverage: namespace authorization, clearance-gated namespaces, the

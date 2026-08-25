@@ -28,7 +28,7 @@ src/deep_research_agent/
     serve.py                           同時跑 A2A server + 排程
     check.py                           花 token 前先驗設定（有問題 exit 1）
 fixtures/                              4 家公司、5 頁 wiki（namespace: supply / platform / shared）、4 份原始週報
-tests/                                 301 個測試，11 個檔案，全部不需要金鑰
+tests/                                 326 個測試，12 個檔案，全部不需要金鑰
 ```
 
 入口點在**套件裡面**不是 `examples/`——它們不是示範，是這個東西實際的跑法，而且容器要的是「裝好」不是「clone 下來」。四個指令共用一個 dispatcher：
@@ -98,7 +98,7 @@ MCP 連不上時預設只印一行結論，加 `-v` 才會印底層的例外（h
 ## 2. 跑單元測試（不花錢、不用金鑰）
 
 ```bash
-uv run pytest              # 301 個測試，約 14 秒
+uv run pytest              # 326 個測試，約 13 秒
 uv run pytest -q tests/test_wiki_authz.py     # 只跑某個檔案
 uv run pytest -k aggregation                  # 只跑名字符合的測試
 ```
@@ -108,6 +108,7 @@ uv run pytest -k aggregation                  # 只跑名字符合的測試
 | `test_wiki_authz.py`（32） | namespace 授權、clearance-gated namespace、aggregation leak 檢查 |
 | `test_mesh.py`（15） | agent-as-tool 的 principal 綁定、citation 傳遞、拒絕處理 |
 | `test_wiring.py`（55） | 每個 agent 的 tool 清單、沒有 subagent 能發布（兩種部署形態都驗）、fact-checker 沒有 search tool、scratchpad/停止條件/矛盾處理有進 prompt、import 風格 |
+| `test_supply_chain_references.py`（25） | 供應鏈的 markdown link 格式、`format_reference` 產出必被 checker 接受、link target 映回 ref |
 | `test_references.py`（41） | 引用格式/形狀/resolvable/宣告一致；retrieval store 存內容；**publish gate**（沒檢查過就拒絕寫）；乾淨草稿不誤報 |
 | `test_cli.py`（25） | 四個入口都 import 得起來且 `--help` 能跑、project root/fixtures 的解析（含從 checkout 以外的目錄）、設定不全時給一行人話而不是 traceback |
 | `test_general_agent.py`（24） | 沒有 domain 也是完整形態、domain 只能加不能放寬規則、tool 能力宣告與 fail-closed 預設 |
@@ -168,14 +169,15 @@ uv run python -m deep_research_agent report --division supply --tier critical --
 # Supply chain incident report — week NN, 2026
 ## Summary
 ...
-**Sources:** https://..., rpt-supply-2026-W28
+**Sources:** [Fire at the Hsinchu fab](https://...), [Acme profile](https://wiki.../supply/acme-semiconductor)
 
 (written to example-report.md)
 ```
 
 檢查這幾件事（對照 `skills/incident-report/SKILL.md` 的規範）：
 
-- **每個 Findings 條目都有 Sources**，而且來源是真的被讀過的（3.1 的 citations 區塊可以對照）
+- **每個 Findings 條目都有 Sources，而且每一項都是 markdown link**（裸 ref 會被 checker 退，發布會被擋）
+- **內文沒有 `rpt-` id**——它們只該出現在 `source_refs`
 - **`none` 有被當成一種發現**，附上跑過哪些 query，而不是整段消失
 - **有 Coverage 段落**說明掃了什麼、沒掃什麼
 - namespace 是 `supply`——用 `-v` 看 log 裡的 `wiki.write` 那行確認
@@ -489,7 +491,7 @@ print('prompt chars:', len(p))
 - A2A server 跟排程可以在同一個 process 穩定跑，外部呼叫走得通（3.6）
 - （若有設定）MCP tool 載得到、模型會用、而且留下 `mcp://` citation（3.7）
 
-這六步涵蓋了 `docs/design/DESIGN.md` §9 列出的「已知限制」之外的核心行為。**沒有自動化的 e2e 測試**（§2 的 301 個測試都用 stub，不叫真的模型）——這是刻意的，因為每次 CI 跑都花 token、還會因為模型輸出的隨機性讓測試不穩定。真要把 §3 這幾步自動化，做法是寫一支跑在 CI 之外（例如手動觸發或排程跑一次）的 smoke test script，判準改成寬鬆的（例如「有沒有 citations」而不是「內容逐字符合」）——這份文件目前先提供人工跑過一遍的步驟，還沒做那支腳本。
+這六步涵蓋了 `docs/design/DESIGN.md` §9 列出的「已知限制」之外的核心行為。**沒有自動化的 e2e 測試**（§2 的 326 個測試都用 stub，不叫真的模型）——這是刻意的，因為每次 CI 跑都花 token、還會因為模型輸出的隨機性讓測試不穩定。真要把 §3 這幾步自動化，做法是寫一支跑在 CI 之外（例如手動觸發或排程跑一次）的 smoke test script，判準改成寬鬆的（例如「有沒有 citations」而不是「內容逐字符合」）——這份文件目前先提供人工跑過一遍的步驟，還沒做那支腳本。
 
 ## 5. 常見卡住的地方
 

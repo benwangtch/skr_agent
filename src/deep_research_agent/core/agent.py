@@ -179,7 +179,9 @@ def build_research_agent(
                 # can open is worse than no gate.
                 require_reference_check=reference_format is not None,
             ),
-            *reference_toolsets(reference_format),
+            *reference_toolsets(
+                reference_format, domain.reference_rules if domain else ()
+            ),
             *(domain.toolsets if domain else ()),
             *extra_toolsets,
         ],

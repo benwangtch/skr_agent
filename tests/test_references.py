@@ -414,13 +414,21 @@ class TestThePublishGate:
         mesh = build_mesh(fixtures=ROOT / "fixtures", project_root=ROOT)
         by_name = {t.name: t for t in mesh.agent.build_tools(ctx)[0]}
 
+        # The supply-chain domain is loaded here, so the draft has to satisfy
+        # its markdown-link rule as well as the structural check.
+        await by_name["wiki_read_page"].ainvoke({"ref": "supply/acme-semiconductor"})
+        links = await by_name["format_reference"].ainvoke(
+            {"refs": ["supply/acme-semiconductor"]}
+        )
+        link = links.split(" -> ", 1)[1]
+
         draft = (
-            "### Acme — critical\n- **What happened:** a fire.\n"
-            "- **Sources:** supply/acme-semiconductor\n"
+            f"### Acme — critical\n- **What happened:** a fire.\n"
+            f"- **Sources:** {link}\n"
         )
         assert not ctx.is_approved(draft)
         await by_name["check_references"].ainvoke({"content": draft})
-        assert ctx.is_approved(draft)
+        assert ctx.is_approved(draft), "a draft meeting the domain format must pass"
 
 
 class TestDeploymentSuppliedReferenceTools:

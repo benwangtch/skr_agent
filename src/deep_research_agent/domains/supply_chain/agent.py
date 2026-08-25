@@ -25,6 +25,13 @@ from deep_research_agent.domains.supply_chain.sources import (
     FixtureNewsFeed,
     NewsFeed,
 )
+from deep_research_agent.domains.supply_chain.reference_tools import (
+    make_reference_format_toolset,
+)
+from deep_research_agent.domains.supply_chain.references import (
+    SUPPLY_CHAIN_FORMAT,
+    SUPPLY_CHAIN_RULES,
+)
 from deep_research_agent.domains.supply_chain.tools import make_bom_toolset, make_news_toolset
 
 __all__ = ["supply_chain_domain", "from_fixtures", "BRIEFING", "INVESTIGATOR_PROMPT"]
@@ -52,7 +59,23 @@ knowing before you start:
 - **A sweep is wide.** When the task covers several companies, give each one to
   a `company-investigator` subagent and launch them in a single message so they
   run concurrently. Investigate directly, without delegating, when the task
-  concerns one company or a handful of lookups.\
+  concerns one company or a handful of lookups.
+
+# How this report cites its sources
+
+Every entry on a `**Sources:**` line is a markdown link, `[name](target)`.
+News links to the article URL; a wiki page links to its route.
+
+**Call `format_reference` to build them.** Pass every reference for a section
+at once and paste back what it returns. Do not write the link by hand: the
+link text has to be the document's name as the source returned it, and the
+tool takes that from what was actually loaded rather than from your memory of
+it.
+
+Raw report ids (`rpt-...`) **never appear in the page**. They are provenance:
+they go in `source_refs` on the publish call, where the aggregation check
+reads them. In the body they are an id no reader can follow, sitting where a
+link belongs — cite the wiki page they back instead.\
 """
 
 
@@ -130,8 +153,16 @@ def supply_chain_domain(*, bom: BomSource, news: NewsFeed) -> ResearchDomain:
             "<supplier>' questions that need real research, not just a lookup."
         ),
         briefing=BRIEFING,
-        toolsets=(make_bom_toolset(bom), make_news_toolset(news)),
+        toolsets=(
+            make_bom_toolset(bom),
+            make_news_toolset(news),
+            make_reference_format_toolset(),
+        ),
         specialists=(INVESTIGATOR,),
+        # Merged into the one check_references call rather than shipped as a
+        # second checker -- see core/references.py::ReferenceRule.
+        reference_format=SUPPLY_CHAIN_FORMAT,
+        reference_rules=SUPPLY_CHAIN_RULES,
         skills=("incident-report",),
         inputs={
             "tier": {

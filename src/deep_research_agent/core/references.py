@@ -41,9 +41,10 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass, field
-from typing import Any, Literal, Mapping, Sequence
+from typing import Any, Callable, Literal, Mapping, Sequence
 
 __all__ = [
+    "ReferenceRule",
     "ReferenceFormat",
     "Violation",
     "ReferenceReport",
@@ -54,6 +55,35 @@ __all__ = [
 
 
 Severity = Literal["error", "warning"]
+
+ReferenceRule = Callable[[str, "ReferenceContext"], "list[Violation]"]
+"""An extra check a domain adds.
+
+Takes the draft and a context (the format, the corpus, the declared
+``source_refs``, the references already extracted) and returns violations.
+Domain rules run in the *same* check as the structural ones on purpose: two
+separate checkers would mean two verdicts, and a draft that passed one and
+failed the other would still be publishable through whichever gate it passed.
+One check, one approval."""
+
+
+@dataclass(frozen=True)
+class ReferenceContext:
+    """What a domain rule is given, so it does not re-parse the draft."""
+
+    fmt: "ReferenceFormat"
+    references: tuple[str, ...]
+    """Every reference found in the body, in first-seen order."""
+
+    corpus: Mapping[str, Mapping[str, Any]] | None
+    """Documents this run loaded, by reference. ``None`` when unavailable."""
+
+    declared: Sequence[str] | None
+    """``source_refs`` for the intended publish call, or ``None`` mid-draft."""
+
+    def section_bodies(self, content: str) -> list[tuple[str, int, str]]:
+        """``(title, start_line, body)`` per claim-bearing section."""
+        return _sections(content, self.fmt)
 
 
 @dataclass(frozen=True)
@@ -96,6 +126,17 @@ class ReferenceFormat:
         "wiki_page": r"\b[a-z][a-z0-9_-]*/[A-Za-z0-9][A-Za-z0-9._-]*\b",
     })
     """The reference shapes this deployment accepts, tried in order."""
+
+    normalise_ref: Callable[[str], str] | None = None
+    """Maps an extracted string back to the canonical reference, when the two
+    differ.
+
+    They differ as soon as a format renders references as links: the parser
+    finds the link *target*, while ``source_refs`` and the retrieval store are
+    keyed by the reference. Without a mapping, a page cited exactly right
+    reads as a URL matching nothing, and the check reports a defect in a
+    correct draft. ``None`` means the extracted string is already canonical.
+    """
 
     required_document_fields: tuple[str, ...] = ()
     """Fields the loaded document must carry for a reference to be renderable
@@ -172,6 +213,11 @@ def extract_references(text: str, fmt: ReferenceFormat = DEFAULT_FORMAT) -> list
     for pattern in fmt.ref_patterns.values():
         for match in re.finditer(pattern, remaining):
             ref = match.group(0).rstrip(".,;:")
+            # Normalise before deduplicating: a page cited once as a link and
+            # once bare is one reference, and reporting it as two would put a
+            # phantom entry in every source_refs cross-check.
+            if fmt.normalise_ref is not None:
+                ref = fmt.normalise_ref(ref)
             if ref not in seen:
                 seen.add(ref)
                 found.append(ref)
@@ -202,6 +248,7 @@ def check_references(
     corpus: Mapping[str, Mapping[str, Any]] | None = None,
     declared: Sequence[str] | None = None,
     fmt: ReferenceFormat = DEFAULT_FORMAT,
+    rules: Sequence[ReferenceRule] = (),
 ) -> ReferenceReport:
     """Check one draft.
 
@@ -215,6 +262,11 @@ def check_references(
     ``declared`` is the ``source_refs`` list the caller intends to pass to the
     publish call, when there is one. ``None`` means "not publishing yet", and
     that cross-check is skipped rather than reported as missing.
+
+    ``rules`` are the domain's own checks, run in this same pass so that one
+    call produces one verdict. A domain that shipped a separate checker would
+    create a second gate, and a draft failing only that one would still be
+    publishable through the first.
     """
     violations: list[Violation] = []
     body_refs = extract_references(content, fmt)
@@ -305,6 +357,12 @@ def check_references(
                     f"earlier draft"
                 ),
             ))
+
+    context = ReferenceContext(
+        fmt=fmt, references=tuple(body_refs), corpus=corpus, declared=declared
+    )
+    for rule in rules:
+        violations.extend(rule(content, context))
 
     return ReferenceReport(violations=tuple(violations), references=tuple(body_refs))
 

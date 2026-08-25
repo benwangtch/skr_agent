@@ -20,6 +20,7 @@ from deep_research_agent.config.mcp import MCP, get_mcp
 from deep_research_agent.config.minio import Minio, get_minio
 from deep_research_agent.config.paths import Paths, get_paths
 from deep_research_agent.config.skills import Skills, get_skills
+from deep_research_agent.config.wiki import Wiki, get_wiki
 
 __all__ = [
     "BaseConfig",
@@ -37,6 +38,8 @@ __all__ = [
     "get_minio",
     "Paths",
     "get_paths",
+    "Wiki",
+    "get_wiki",
     "reset_settings_cache",
 ]
 
@@ -55,3 +58,4 @@ def reset_settings_cache() -> None:
     get_skills.cache_clear()
     get_minio.cache_clear()
     get_paths.cache_clear()
+    get_wiki.cache_clear()

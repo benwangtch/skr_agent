@@ -29,7 +29,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any, Sequence
 
-from deep_research_agent.core.references import ReferenceFormat
+from deep_research_agent.core.references import ReferenceFormat, ReferenceRule
 from deep_research_agent.runtime import ToolsetFactory
 
 __all__ = ["ResearchDomain", "Specialist"]
@@ -90,3 +90,11 @@ class ResearchDomain:
 
     ``build_research_agent(check_references=False)`` is the escape hatch for a
     deployment with no citation convention at all."""
+
+    reference_rules: Sequence[ReferenceRule] = ()
+    """Extra reference checks this domain adds, merged into the single
+    ``check_references`` call rather than shipped as a second checker.
+
+    Two checkers would mean two verdicts and two gates, and a draft failing
+    only the domain's would still be publishable through the other. One check,
+    one approval, one thing to pass."""

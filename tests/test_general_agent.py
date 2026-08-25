@@ -128,7 +128,7 @@ class TestCapabilitiesDecideWhoGetsWhat:
         _, subs = surface(domained.agent)
         tools = {t.name for t in subs["fact-checker"]["tools"]}
         assert {"wiki_read_page", "fetch_article", "get_bom_company",
-                "check_references"} == tools
+                "check_references", "format_reference"} == tools
 
     def test_the_researcher_gets_every_read_only_tool(self, domained):
         names, subs = surface(domained.agent)

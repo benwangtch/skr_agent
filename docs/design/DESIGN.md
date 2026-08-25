@@ -232,6 +232,27 @@ fingerprint 只正規化行尾空白——再寬鬆一點，改過的草稿就�
 
 prompt 裡的 `REFERENCES` 那段仍然要寫，但角色從**強制**降級成**解釋**：讓模型知道為什麼被擋、怎麼過關，才不會浪費 turn 去撞一道它不理解的牆。
 
+#### domain 可以定義自己的引用格式
+
+供應鏈報告的格式是：**Sources 行上每一項都是 markdown link**，新聞連到文章 URL、wiki 頁連到它的 route（`wiki/routes.py`，先 mock，真實 routing 之後換那一個函式就好）。**raw report id 不進內文**——它是 provenance 不是給讀者點的東西，留在 publish call 的 `source_refs` 裡供 aggregation check 讀。
+
+做成**兩個 tool，分工是重點**：
+
+| | 做什麼 | 為什麼要獨立 |
+|---|---|---|
+| `format_reference` | 給 ref，回傳正確的 markdown | 叫模型照描述重建格式，它會弄得「差不多對」，而差不多對每次都要一輪 check-fix-recheck |
+| domain rules | 併進**同一個** `check_references` | 兩個 checker = 兩個判決 = 兩道 gate，只沒過其中一道的草稿照樣發得出去 |
+
+link 文字取自 **retrieval store 裡文件的名字**（tool 回傳的那個），不是模型寫的。這是 §4.1c 那個 store 存**內容**不只存 ref 的直接用途。
+
+`ResearchDomain.reference_rules` 是 domain 加規則的方式，`ReferenceRule` 拿到草稿和一個已經解析好的 context，回傳 violations。跟 `reference_format` 一樣是加法，不能放寬 core 的檢查。
+
+**實跑時才發現的問題：一旦來源變成 markdown link，parser 找到的是 link target 不是 ref。** wiki 頁被正確引用成 `[名字](https://wiki/.../supply/acme)` 之後，抽出來的是那串 URL，跟 `source_refs` 裡的 `supply/acme` 對不起來——checker 會對一份完全正確的草稿報錯。所以 `ReferenceFormat` 多了 `normalise_ref`，供應鏈用 `ref_from_url()` 把 wiki URL 映回 `namespace/slug`，而且**正規化發生在去重之前**（同一頁一次寫成 link 一次寫成裸 ref 是同一個來源）。
+
+這類問題單元測試抓不到，因為單元測試餵的是手寫的草稿。抓到它的是把 generator 產出接進 checker 跑一次——現在那條性質有測試守著：**generator 產出的東西，checker 一定接受**。這兩者一旦不一致，agent 會在兩個 tool 之間來回而永遠收斂不了。
+
+`skills/incident-report/SKILL.md` 的 provenance 規則同步改掉了。它是 inline 進 prompt 的，留著舊寫法等於一邊叫 agent 產生裸 ref、一邊用 checker 退它。
+
 #### deployment 可以帶自己的 reference tool
 
 有 house style linter、citation formatter、或某台 MCP server 懂公司格式的話，用 `reference_authority()` 標記它，wiring 就會找到並交給 `reference-checker`，跟 subagent 選 tool 用 capability 而不是比對名字是同一套機制。
@@ -491,7 +512,7 @@ await asyncio.gather(
 ## 8. 測試策略
 
 ```
-301 個測試，全部不需要金鑰、不呼叫模型
+326 個測試，全部不需要金鑰、不呼叫模型
   test_wiring.py      55   tool 清單、subagent 邊界、deep research 結構、報告取回、skill 載入、import 風格
   test_wiki_authz.py  32   namespace 授權、clearance、aggregation leak
   test_a2a_server.py  32   executor 生命週期 + 6 個走真 handler/HTTP 的整合測試
@@ -503,6 +524,7 @@ await asyncio.gather(
   test_mesh.py        15   agent-as-tool 的 principal 綁定、citation 傳遞
   test_cli.py         25   四個入口都 import 得起來、path 解析（含 checkout 外）、啟動前的設定檢查
   test_references.py  41   引用格式/形狀/resolvable/宣告一致；retrieval store；publish gate；乾淨草稿不誤報
+  test_supply_chain_references.py 25  markdown link 格式、generator 與 checker 一致、link target 映回 ref
 ```
 
 三個刻意的選擇：

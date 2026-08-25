@@ -41,10 +41,10 @@ nothing above `medium`, say that in the first sentence.
 ### <Company name> — <severity>
 - **What happened:** one or two sentences, sourced.
 - **Components affected:** from the BOM entry.
-- **Internal context:** what the wiki already knew, with the page reference.
-  Write "no internal record" when there is none.
+- **Internal context:** what the wiki already knew, linked. Write "no
+  internal record" when there is none.
 - **Assessment:** why this severity and not the one above or below it.
-- **Sources:** every URL and raw report id backing the above.
+- **Sources:** every source backing the above, as markdown links.
 
 ### <Company name> — none
 - **Queries run:** the alias terms searched.
@@ -61,11 +61,20 @@ Anything needing a human. Empty section is fine; delete it rather than padding.
 ## Provenance rules
 
 1. Every claim in **Findings** carries a source. No source, no claim.
-2. `source_refs` on the publish call lists every raw report id and external
-   URL used anywhere on the page. The publish is rejected without it.
-3. Never cite an article you have not fetched in full.
-4. Internal context keeps the returned page reference verbatim. Do not
-   paraphrase a page reference into a description of it.
+2. **Every entry on a `Sources:` line is a markdown link**, `[name](target)`.
+   News links to the article URL; a wiki page links to its route. Build them
+   with `format_reference` — pass every reference for the section at once and
+   paste back what it returns. Writing the link by hand gets the name wrong,
+   because the name has to be the document's as the source returned it.
+3. **Raw report ids never appear in the page.** They are provenance, not
+   something a reader can follow. They go in `source_refs` on the publish
+   call, where the aggregation check reads them; in the body, cite the wiki
+   page they back instead.
+4. `source_refs` on the publish call lists every source used anywhere on the
+   page, raw report ids included. The publish is rejected without it.
+5. Never cite an article you have not fetched in full.
+6. Publishing is blocked until the exact text you intend to publish has passed
+   `check_references`. Edit the draft afterwards and it must pass again.
 
 ## Writing
 

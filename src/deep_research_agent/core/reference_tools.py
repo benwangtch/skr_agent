@@ -44,6 +44,7 @@ from deep_research_agent.capabilities import lookup
 from deep_research_agent.core.references import (
     DEFAULT_FORMAT,
     ReferenceFormat,
+    ReferenceRule,
     check_references,
 )
 from deep_research_agent.protocol import RetrievedDocument
@@ -100,8 +101,11 @@ def _corpus(documents: Sequence[RetrievedDocument]) -> dict[str, dict[str, Any]]
     }
 
 
-def make_reference_toolset(fmt: ReferenceFormat = DEFAULT_FORMAT) -> ToolsetFactory:
-    """A toolset holding the general reference checker for one format."""
+def make_reference_toolset(
+    fmt: ReferenceFormat = DEFAULT_FORMAT,
+    rules: Sequence[ReferenceRule] = (),
+) -> ToolsetFactory:
+    """A toolset holding the reference checker for one format and its rules."""
 
     def factory(ctx: ToolContext) -> ToolBundle:
         async def check_references_tool(
@@ -114,6 +118,7 @@ def make_reference_toolset(fmt: ReferenceFormat = DEFAULT_FORMAT) -> ToolsetFact
                 corpus=_corpus(ctx.documents),
                 declared=source_refs,
                 fmt=fmt,
+                rules=rules,
             )
             if report.passed:
                 # Approving here rather than in the caller is what makes the
@@ -171,10 +176,12 @@ def make_reference_toolset(fmt: ReferenceFormat = DEFAULT_FORMAT) -> ToolsetFact
     return factory
 
 
-def reference_toolsets(fmt: ReferenceFormat | None) -> Sequence[ToolsetFactory]:
-    """Zero or one toolset — ``None`` turns the general check off entirely.
+def reference_toolsets(
+    fmt: ReferenceFormat | None, rules: Sequence[ReferenceRule] = ()
+) -> Sequence[ToolsetFactory]:
+    """Zero or one toolset — ``None`` turns the check off entirely.
 
     A deployment whose output has no citation convention should not be handed
     a tool that will report every section as unsourced.
     """
-    return () if fmt is None else (make_reference_toolset(fmt),)
+    return () if fmt is None else (make_reference_toolset(fmt, rules),)
