@@ -129,6 +129,35 @@ def check_skills() -> list[str]:
     return problems
 
 
+def check_langfuse() -> list[str]:
+    from deep_research_agent.config import get_langfuse
+    from deep_research_agent.observability import langfuse_handler
+
+    problems: list[str] = []
+    print("\nLangfuse (tracing)")
+    config = get_langfuse()
+
+    for problem in config.problems():
+        print(f"{BAD} {problem}")
+        problems.append(problem)
+
+    if not config.configured():
+        print(f"{WARN} tracing is off (set LANGFUSE_PUBLIC_KEY + LANGFUSE_SECRET_KEY)")
+        print(f"{INFO} the agent runs normally without it")
+        return problems
+
+    print(f"{INFO} host   : {config.base_url}")
+    print(f"{INFO} env    : {config.environment or '(langfuse default)'}")
+    if langfuse_handler() is None:
+        print(f"{BAD} configured, but no handler could be built -- see the log above")
+        problems.append("Langfuse handler unavailable")
+    else:
+        print(f"{OK} handler ready -- runs will export tool calls, MCP calls and subagents")
+        print(f"{INFO} reachability is not checked here; the SDK exports in the "
+              f"background, so a wrong host shows up as missing traces, not an error")
+    return problems
+
+
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument(
@@ -147,6 +176,7 @@ def main() -> int:
     problems = check_llm(args.llm)
     problems += asyncio.run(check_mcp(args.verbose))
     problems += check_skills()
+    problems += check_langfuse()
 
     print()
     if problems:

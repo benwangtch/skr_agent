@@ -14,6 +14,7 @@ from __future__ import annotations
 
 from deep_research_agent.config.base import BaseConfig
 from deep_research_agent.config.db import DB, get_db
+from deep_research_agent.config.langfuse import Langfuse, get_langfuse
 from deep_research_agent.config.llm import LLM, get_llm
 from deep_research_agent.config.mcp import MCP, get_mcp
 from deep_research_agent.config.minio import Minio, get_minio
@@ -25,6 +26,8 @@ __all__ = [
     "get_llm",
     "DB",
     "get_db",
+    "Langfuse",
+    "get_langfuse",
     "MCP",
     "get_mcp",
     "Skills",
@@ -45,5 +48,6 @@ def reset_settings_cache() -> None:
     get_llm.cache_clear()
     get_db.cache_clear()
     get_mcp.cache_clear()
+    get_langfuse.cache_clear()
     get_skills.cache_clear()
     get_minio.cache_clear()

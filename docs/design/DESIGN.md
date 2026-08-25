@@ -40,6 +40,7 @@
 | 排程 | 自寫的 in-process `Scheduler` | 要跟 A2A server 共用同一份資料來源與 principal 邏輯——§7.4 |
 | A2A 與排程的部署 | 同一個 process、同一個 `asyncio.gather` | 兩者只是「誰觸發」的不同入口——§7.5 |
 | MCP service | 第四種資料來源，啟動時載入一次 | tool 本來就是 LangChain tool；但**身份不會傳過去**——§5.5 |
+| 觀測性怎麼做？ | **Langfuse**（LangChain callback handler），預設關閉 | LangSmith 不能用；tool call / MCP / subagent 全部自動進 trace——見 §6.1 |
 | 套件內 import | 一律絕對 import | 有測試擋著，見 §8 |
 
 ---
@@ -250,6 +251,28 @@ LLM_MODEL=內部 model 名稱
 
 **MCP**：單一 server 用 `MCP_URL` + `MCP_TOKEN`；多個或 stdio 用 `MCP_SERVERS`（JSON）。兩者都設時 **`MCP_SERVERS` 整組蓋過 `MCP_URL`，不是合併**——合併到一半的連線設定比明顯被忽略的變數難除錯得多。
 
+### 6.1 Langfuse 追蹤
+
+**兩把 key 都設才會開**（`LANGFUSE_PUBLIC_KEY` + `LANGFUSE_SECRET_KEY`），`LANGFUSE_BASE_URL` 預設就是內部那台。只設一把會被當成設定錯誤報出來，而不是半開。
+
+開了之後，一次 run 會匯出：
+
+| 想看的東西 | 怎麼進到 trace 的 |
+|---|---|
+| **每個 tool call** | LangChain 每個 tool run 都發 callback，自動變成一個 span（含參數、結果、耗時）。這邊不用列舉任何 tool |
+| **哪些是 MCP、來自哪台 server** | 光看 span 名字分不出來，所以 `mcp.py` 在包裝時把 `tool_source="mcp"` 和 server 名字寫進 tool 的 metadata，跟著進 span |
+| **subagent 委派** | `task` 這個 tool call 的 input 帶 `subagent_type`，subagent 自己的 graph 又是一個以它命名的巢狀 chain span——**一次委派會出現兩次**，這是刻意的：一次是「決定要委派」，一次是「實際做的事」 |
+| **誰觸發的** | trace 的 Langfuse user 是 `Principal.subject`，tag 帶 division 和 actor（service/user）。同一個問題不同 principal 跑出來的兩份 trace，就是靠這個分辨 |
+
+session id 用 `trace_id`——A2A 本來就把 `task_id` 當 `trace_id` 傳進來，所以一個 A2A task 和它觸發的 run 會歸在同一個 session。
+
+**兩條不會妥協的規則**（`observability.py`）：
+
+1. **追蹤不能弄壞 run。** host 連不到、key 被拒、exporter 起不來——全部降級成「沒有追蹤」並記一次 log。觀測後端掛掉不是研究工作失敗的理由（實測過：把 base_url 指到死掉的 port，run 照常 `status=ok`）。
+2. **沒設定就完全不連。** 沒有 handler、沒有網路行為。
+
+`uv run python examples/check_setup.py` 會報告目前是開是關。**注意它不驗證連得到**——SDK 是背景批次匯出的，host 打錯的症狀是「Langfuse 裡沒有 trace」，不是啟動報錯。
+
 ---
 
 ## 7. Serving
@@ -336,12 +359,13 @@ await asyncio.gather(
 ## 8. 測試策略
 
 ```
-191 個測試，全部不需要金鑰、不呼叫模型
+210 個測試，全部不需要金鑰、不呼叫模型
   test_wiki_authz.py  32   namespace 授權、clearance、aggregation leak
   test_a2a_server.py  32   executor 生命週期 + 6 個走真 handler/HTTP 的整合測試
   test_wiring.py      54   tool 清單、subagent 邊界、deep research 結構、報告取回、skill 載入、import 風格
   test_config.py      22   provider 預設、env 覆蓋、chat model 形狀
   test_scheduler.py   19   cron 時序、失敗隔離
+  test_observability.py 19  Langfuse 設定、降級、trace metadata、MCP 標記
   test_mcp.py         17   設定解析、降級、對真的 MCP server 載入/呼叫/citation
   test_mesh.py        15   agent-as-tool 的 principal 綁定、citation 傳遞
 ```

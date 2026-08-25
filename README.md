@@ -38,10 +38,12 @@ src/deep_research_agent/
   principals.py    service_principal() vs user_principal() — who triggers a run
   assembly.py      wiring; the only module that knows about all the others
   mcp.py           ★ MCP servers as a data source (off unless configured)
+  observability.py ★ Langfuse tracing: tool calls, MCP calls, subagents
   config/
     base.py          BaseConfig — every IO-service config inherits this
     llm.py           ★ which chat model the agent runs on (any LangChain provider)
     mcp.py           ★ which MCP servers to connect
+    langfuse.py      ★ tracing — off unless both keys are set
     db.py            placeholder, same pattern, nothing uses it yet
     minio.py         placeholder, same pattern, nothing uses it yet
   wiki/              one data source — the only one with an authz model
@@ -143,7 +145,7 @@ scheduler survive running together).
 ## Test
 
 ```bash
-uv run pytest              # 191 tests, no credentials required
+uv run pytest              # 210 tests, no credentials required
 ```
 
 Coverage: namespace authorization, clearance-gated namespaces, the

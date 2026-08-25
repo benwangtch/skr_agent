@@ -36,6 +36,7 @@ from langchain_core.messages import AIMessage, BaseMessage, ToolMessage
 from langchain_core.tools import BaseTool
 
 from deep_research_agent.config import get_llm
+from deep_research_agent.observability import run_config
 from deep_research_agent.protocol import (
     AgentRequest,
     AgentResponse,
@@ -360,7 +361,9 @@ class DeepAgent:
         try:
             result = await graph.ainvoke(
                 {"messages": [{"role": "user", "content": self._prompt(request)}]},
-                config={"recursion_limit": self._recursion_limit(request)},
+                config=run_config(
+                    self.name, request, recursion_limit=self._recursion_limit(request)
+                ),
             )
         except Exception as exc:
             log.exception("runtime.failed agent=%s trace=%s", self.name, request.trace_id)
@@ -401,7 +404,9 @@ class DeepAgent:
         try:
             async for chunk in graph.astream(
                 {"messages": [{"role": "user", "content": self._prompt(request)}]},
-                config={"recursion_limit": self._recursion_limit(request)},
+                config=run_config(
+                    self.name, request, recursion_limit=self._recursion_limit(request)
+                ),
                 stream_mode="updates",
             ):
                 for update in chunk.values():

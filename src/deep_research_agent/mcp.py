@@ -71,6 +71,11 @@ def _wrap_with_citation(tool: BaseTool, server: str, ctx: ToolContext) -> BaseTo
         name=tool.name,
         description=tool.description,
         args_schema=tool.args_schema,
+        # Rides along to the trace span. A tool span alone cannot tell you
+        # whether this came from an MCP server or from this codebase, and
+        # "which MCP server did this run actually touch" is exactly the
+        # question a trace should answer.
+        metadata={"tool_source": "mcp", "mcp_server": server},
     )
 
 
