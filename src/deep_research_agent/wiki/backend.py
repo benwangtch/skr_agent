@@ -131,7 +131,7 @@ class InMemoryWikiBackend:
         """Every page ref currently stored.
 
         Exists so a caller can snapshot before a run and diff after, which is
-        how ``examples/run_report.py`` works out which pages the agent just
+        how ``cli/report.py`` works out which pages the agent just
         wrote. The report a run produces lives on a wiki page, not in the
         agent's final message — without this there is no way to read it back
         out of an in-memory backend before the process exits.

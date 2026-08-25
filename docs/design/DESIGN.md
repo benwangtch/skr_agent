@@ -20,7 +20,7 @@
 | 例子 | 每週供應鏈掃描 | 使用者打字問任何事 |
 | 組法 | `build_mesh(domain=supply_chain.from_fixtures)` | `build_mesh(domain=None)` |
 | 多了什麼 | BOM/新聞來源、`company-investigator`、嚴重度 rubric | 什麼都沒多 |
-| 入口 | `serving/scheduler.py`、`examples/run_report.py` | A2A、`examples/ask.py` |
+| 入口 | `serving/scheduler.py`、`cli/report.py` | A2A、`cli/ask.py` |
 
 **`domain=None` 是完整形態，不是降級形態。** 讓它擅長研究的東西（§4 那四個設計）全都在 core，兩種形態都有。domain 只會**加**東西，不能拿掉也不能放寬任何規則——§3.4。
 
@@ -158,7 +158,7 @@ mutating(tool)   # 會改外面的狀態            → 只有頂層 agent
 
 實測過兩件事：
 
-- **忘記宣告不會破功。** 把 `wiki_write_page` 的 `mutating()` 拿掉，235 個測試仍然全綠——因為 fail-closed，未宣告一樣被擋。
+- **忘記宣告不會破功。** 把 `wiki_write_page` 的 `mutating()` 拿掉，整套測試仍然全綠——因為 fail-closed，未宣告一樣被擋。
 - **宣告錯會被抓到。** 把它改宣告成 `search()`，**7 個測試變紅**，其中包含從 `SubAgentMiddleware` 實際收到的清單去驗的那幾個。
 
 ---
@@ -305,7 +305,8 @@ MCP tool **不給任何 subagent**，而且這件事現在是自動的：它們�
 一個服務一個檔案、一個 class、一個 `env_prefix`，全部繼承 `BaseConfig`。**目的是把「搬進公司環境」壓到「改 `.env`」。**
 
 ```
-config/  base.py  llm.py（接上）  mcp.py（接上，預設關）  db.py / minio.py（佔位）
+config/  base.py  llm.py（接上）  mcp.py（接上，預設關）  langfuse.py（預設關）
+         paths.py（skills / fixtures 的根，checkout 內自動找）  db.py / minio.py（佔位）
 ```
 
 pydantic v2 下的關鍵行為（有測試驗證）：**子類別的 `model_config` 會跟父類別合併，不是整個蓋掉**——所以子類同時有 `env_file`（繼承）和 `env_prefix`（自己設的）。
@@ -345,7 +346,7 @@ session id 用 `trace_id`——A2A 本來就把 `task_id` 當 `trace_id` 傳進�
 1. **追蹤不能弄壞 run。** host 連不到、key 被拒、exporter 起不來——全部降級成「沒有追蹤」並記一次 log。觀測後端掛掉不是研究工作失敗的理由（實測過：把 base_url 指到死掉的 port，run 照常 `status=ok`）。
 2. **沒設定就完全不連。** 沒有 handler、沒有網路行為。
 
-`uv run python examples/check_setup.py` 會報告目前是開是關。**注意它不驗證連得到**——SDK 是背景批次匯出的，host 打錯的症狀是「Langfuse 裡沒有 trace」，不是啟動報錯。
+`uv run python -m deep_research_agent check` 會報告目前是開是關。**注意它不驗證連得到**——SDK 是背景批次匯出的，host 打錯的症狀是「Langfuse 裡沒有 trace」，不是啟動報錯。
 
 ---
 
@@ -433,7 +434,7 @@ await asyncio.gather(
 ## 8. 測試策略
 
 ```
-235 個測試，全部不需要金鑰、不呼叫模型
+252 個測試，全部不需要金鑰、不呼叫模型
   test_wiring.py      55   tool 清單、subagent 邊界、deep research 結構、報告取回、skill 載入、import 風格
   test_wiki_authz.py  32   namespace 授權、clearance、aggregation leak
   test_a2a_server.py  32   executor 生命週期 + 6 個走真 handler/HTTP 的整合測試
@@ -443,6 +444,7 @@ await asyncio.gather(
   test_observability.py 19  Langfuse 設定、降級、trace metadata、MCP 標記
   test_mcp.py         17   設定解析、降級、對真的 MCP server 載入/呼叫/citation
   test_mesh.py        15   agent-as-tool 的 principal 綁定、citation 傳遞
+  test_cli.py         17   四個入口都 import 得起來、path 解析（含 checkout 外）
 ```
 
 三個刻意的選擇：

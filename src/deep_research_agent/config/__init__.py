@@ -18,6 +18,7 @@ from deep_research_agent.config.langfuse import Langfuse, get_langfuse
 from deep_research_agent.config.llm import LLM, get_llm
 from deep_research_agent.config.mcp import MCP, get_mcp
 from deep_research_agent.config.minio import Minio, get_minio
+from deep_research_agent.config.paths import Paths, get_paths
 from deep_research_agent.config.skills import Skills, get_skills
 
 __all__ = [
@@ -34,6 +35,8 @@ __all__ = [
     "get_skills",
     "Minio",
     "get_minio",
+    "Paths",
+    "get_paths",
     "reset_settings_cache",
 ]
 
@@ -51,3 +54,4 @@ def reset_settings_cache() -> None:
     get_langfuse.cache_clear()
     get_skills.cache_clear()
     get_minio.cache_clear()
+    get_paths.cache_clear()

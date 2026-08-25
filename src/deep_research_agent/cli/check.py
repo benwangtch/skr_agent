@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """Check the setup before spending tokens on a real run.
 
-    uv run python examples/check_setup.py            # config + MCP connectivity
-    uv run python examples/check_setup.py --llm      # also send one tiny real request
+    python -m deep_research_agent check            # config + MCP connectivity
+    python -m deep_research_agent check --llm      # also send one tiny real request
 
 Answers "is this configured correctly" without running the agent. Everything
 except --llm is free: reading config costs nothing, and connecting to an MCP
@@ -16,9 +16,8 @@ from __future__ import annotations
 import argparse
 import asyncio
 import sys
-from pathlib import Path
 
-ROOT = Path(__file__).resolve().parent.parent
+from deep_research_agent.config import get_paths
 
 OK, BAD, WARN, INFO = "  [ok]", "  [!!]", "  [--]", "     "
 
@@ -110,18 +109,20 @@ def check_skills() -> list[str]:
 
     problems: list[str] = []
     print("\nSkills")
-    print(f"{INFO} search path: {', '.join(str(r) for r in skill_roots(ROOT))}")
+    root = get_paths().resolved_project_root()
+    print(f"{INFO} root         : {root}")
+    print(f"{INFO} search path: {', '.join(str(r) for r in skill_roots(root))}")
 
-    available = discover_skills(ROOT)
+    available = discover_skills(root)
     # Checked against the scheduled deployment, which is the one whose skills
     # have to resolve unattended. A face-to-user run with no domain loads only
     # what SKILLS_ENABLED names.
-    domain_skills = list(supply_chain.from_fixtures(ROOT / "fixtures").skills)
+    domain_skills = list(supply_chain.from_fixtures(get_paths().resolved_fixtures()).skills)
     loaded = domain_skills + _env_skills(domain_skills)
 
     for name in loaded:
         try:
-            body = load_skill(ROOT, name)
+            body = load_skill(root, name)
         except FileNotFoundError as exc:
             print(f"{BAD} {name}: {exc}".replace("\n", " "))
             problems.append(f"skill {name!r} not found")
@@ -163,15 +164,23 @@ def check_langfuse() -> list[str]:
     return problems
 
 
-def main() -> int:
-    parser = argparse.ArgumentParser()
-    parser.add_argument(
+def parser() -> argparse.ArgumentParser:
+    p = argparse.ArgumentParser(
+        prog="python -m deep_research_agent check",
+        description="Verify configuration. Exits non-zero on problems, so it "
+        "works as a deployment gate.",
+    )
+    p.add_argument(
         "--llm", action="store_true",
         help="Send one tiny real request to the model. Costs a negligible "
         "amount and is the only way to prove the endpoint and key actually work.",
     )
-    parser.add_argument("-v", "--verbose", action="store_true")
-    args = parser.parse_args()
+    p.add_argument("-v", "--verbose", action="store_true")
+    return p
+
+
+def main(argv: list[str] | None = None) -> int:
+    args = parser().parse_args(argv)
 
     if args.verbose:
         import logging
@@ -196,3 +205,4 @@ def main() -> int:
 
 if __name__ == "__main__":
     sys.exit(main())
+

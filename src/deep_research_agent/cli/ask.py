@@ -1,16 +1,15 @@
-#!/usr/bin/env python3
 """Ask the agent anything — the face-to-user path, with no domain configured.
 
-    uv run python examples/ask.py "Why did our Q3 lead times slip?"
-    uv run python examples/ask.py --division platform "What do we know about the auth rewrite?"
-    uv run python examples/ask.py --read-only "..."     # research, never publish
+    python -m deep_research_agent ask "Why did our Q3 lead times slip?"
+    python -m deep_research_agent ask --division platform "What about the auth rewrite?"
+    python -m deep_research_agent ask --read-only "..."     # research, never publish
 
-This is the other half of the deployment story from `run_report.py`. That one
-runs a *known* task on a schedule, so it loads the supply-chain domain: BOM
+This is the other half of the deployment story from ``report``. That one runs
+a *known* task on a schedule, so it loads the supply-chain domain: BOM
 sources, an investigator that understands aliases, a severity rubric.
 
 Here the question is whatever the user typed. There is no domain to select in
-advance, so none is loaded (`domain=None`) — the agent gets the generic
+advance, so none is loaded (``domain=None``) — the agent gets the generic
 research loop, the internal wiki, and any MCP servers you configured, and
 works out the rest itself. The research machinery is identical either way:
 same planning, same scratchpad, same fact-checker before anything publishes.
@@ -23,43 +22,43 @@ from __future__ import annotations
 import argparse
 import asyncio
 import logging
-from pathlib import Path
 
 from deep_research_agent import Budget, build_mesh
+from deep_research_agent.config import get_paths
 from deep_research_agent.mcp import mcp_toolset_from_config
 from deep_research_agent.observability import flush
 from deep_research_agent.principals import user_principal
 from deep_research_agent.protocol import AgentRequest
 
-ROOT = Path(__file__).resolve().parent.parent
 
-
-async def main() -> None:
-    parser = argparse.ArgumentParser()
-    parser.add_argument("question", help="Anything. It plans its own investigation.")
-    parser.add_argument("--division", default="supply", help="Whose scope to run under.")
-    parser.add_argument(
+def parser() -> argparse.ArgumentParser:
+    p = argparse.ArgumentParser(
+        prog="python -m deep_research_agent ask",
+        description="Research an open-ended question. No domain is loaded.",
+    )
+    p.add_argument("question", help="Anything. It plans its own investigation.")
+    p.add_argument("--division", default="supply", help="Whose scope to run under.")
+    p.add_argument(
         "--read-only",
         action="store_true",
         help="Drop the write role, so it researches and answers without publishing.",
     )
-    parser.add_argument("--max-turns", type=int, default=40)
-    parser.add_argument("-v", "--verbose", action="store_true")
-    args = parser.parse_args()
+    p.add_argument("--max-turns", type=int, default=40)
+    p.add_argument("-v", "--verbose", action="store_true")
+    return p
 
-    logging.basicConfig(
-        level=logging.INFO if args.verbose else logging.WARNING,
-        format="%(levelname)s %(name)s %(message)s",
-    )
+
+async def run(args: argparse.Namespace) -> int:
+    paths = get_paths()
 
     mcp_toolset = await mcp_toolset_from_config()
     if mcp_toolset:
         print("→ MCP tools loaded from configured server(s)")
 
     mesh = build_mesh(
-        fixtures=ROOT / "fixtures",
-        project_root=ROOT,
-        domain=None,  # the whole point of this example
+        fixtures=paths.resolved_fixtures(),
+        project_root=paths.resolved_project_root(),
+        domain=None,  # the whole point of this command
         extra_toolsets=[mcp_toolset] if mcp_toolset else (),
     )
 
@@ -99,7 +98,17 @@ async def main() -> None:
     # Short-lived process: the tracing SDK batches in the background, so
     # without this the run's trace can be discarded at exit.
     flush()
+    return 0 if response.status == "ok" else 1
+
+
+def main(argv: list[str] | None = None) -> int:
+    args = parser().parse_args(argv)
+    logging.basicConfig(
+        level=logging.INFO if args.verbose else logging.WARNING,
+        format="%(levelname)s %(name)s %(message)s",
+    )
+    return asyncio.run(run(args))
 
 
 if __name__ == "__main__":
-    asyncio.run(main())
+    raise SystemExit(main())

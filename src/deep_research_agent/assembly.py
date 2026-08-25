@@ -56,7 +56,7 @@ def build_mesh(
     briefing, no domain sources, no specialists — just the research loop, the
     wiki, and any MCP servers. That is the face-to-user configuration, where
     someone types a question nobody anticipated and there is no domain to
-    select in advance. See ``examples/ask.py``.
+    select in advance. See ``cli/ask.py``.
 
     ``with_wiki_agent`` controls an open question in the design: by default the
     wiki is a set of authorized tools that callers mount directly, which is one
@@ -68,7 +68,7 @@ def build_mesh(
     how MCP servers get in (see ``deep_research_agent.mcp``). It is a parameter
     rather than something this function loads itself because MCP discovery is
     async and this is not: the caller loads once at startup and passes the
-    result down. ``examples/run_report.py`` and ``serving/service.py`` both do.
+    result down. ``cli/report.py`` and ``serving/service.py`` both do.
 
     Swap ``InMemoryWikiBackend`` for the real wiki client and the domain's
     fixture sources for real services; nothing else here changes.

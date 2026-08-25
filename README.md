@@ -13,7 +13,7 @@ It is not tied to a subject. Two deployment shapes, one agent:
 | Example | the weekly supply-chain sweep | someone types any question |
 | Built as | `build_mesh(domain=supply_chain.from_fixtures)` | `build_mesh(domain=None)` |
 | Adds | BOM/news sources, a `company-investigator`, a severity rubric | nothing |
-| Entry point | `serving/scheduler.py`, `examples/run_report.py` | A2A, `examples/ask.py` |
+| Entry point | `serving/scheduler.py`, `cli/report.py` | A2A, `cli/ask.py` |
 
 **`domain=None` is a complete configuration, not a degraded one.** Everything
 that makes it good at research lives in `core/` and is present either way: a
@@ -47,6 +47,8 @@ kind that actually calls the model, unlike the test suite below).
 
 ```
 src/deep_research_agent/
+  __main__.py      ★ python -m deep_research_agent <ask|report|serve|check>
+  cli/             ★ the entry points — each also runnable on its own
   protocol.py      the contract every agent speaks (no agent-framework dependency)
   capabilities.py  ★ lookup / search / mutating — what a tool may do, declared
   mesh.py          agent-as-tool adapter + registry
@@ -67,6 +69,7 @@ src/deep_research_agent/
     llm.py           ★ which chat model the agent runs on (any LangChain provider)
     mcp.py           ★ which MCP servers to connect
     langfuse.py      ★ tracing — off unless both keys are set
+    paths.py         where skills and fixture data live (found automatically in a checkout)
     db.py            placeholder, same pattern, nothing uses it yet
     minio.py         placeholder, same pattern, nothing uses it yet
   wiki/              always mounted — the only source with an authz model
@@ -93,7 +96,7 @@ cp .env.example .env
 ```
 
 `uv run <command>` runs inside that venv without activating it
-(`uv run pytest`, `uv run python examples/run_report.py`, ...). Prefer that
+(`uv run pytest`, `uv run python -m deep_research_agent report`, ...). Prefer that
 over `source .venv/bin/activate` so the venv can't silently drift from the
 lockfile.
 
@@ -132,21 +135,37 @@ The test suite needs no credentials at all.
 
 ## Run it
 
+Four commands, all under one entry point:
+
+```
+python -m deep_research_agent <command>     # or the `deep-research-agent` console script
+  ask       research any question — no domain, the face-to-user path
+  report    the supply-chain sweep — what the schedule runs
+  serve     A2A server + scheduler in one process
+  check     verify configuration; exits non-zero, so it works as a deploy gate
+```
+
+Each is also importable and runnable on its own
+(`python -m deep_research_agent.cli.ask "…"`), so neither route is the
+privileged one. They live in the package rather than in an `examples/` folder
+because none of them is an example — they are how you run this, and a
+container needs them installed, not checked out.
+
 ```bash
-uv run python examples/check_setup.py                       # verify config before spending tokens
-uv run python examples/check_setup.py --llm                 # ...and prove the model endpoint works
+uv run python -m deep_research_agent check                       # verify config before spending tokens
+uv run python -m deep_research_agent check --llm                 # ...and prove the model endpoint works
 
 # The scheduled deployment: a known task, with the supply-chain domain loaded.
-uv run python examples/run_report.py --out report.md        # user-triggered; --out saves the published report
-uv run python examples/run_report.py --scheduled            # service account: cross-division, exec roll-up
-uv run python examples/run_report.py --dry-run              # research only
-uv run python examples/run_report.py --reader-only          # exercise the refusal path
+uv run python -m deep_research_agent report --out report.md        # user-triggered; --out saves the published report
+uv run python -m deep_research_agent report --scheduled            # service account: cross-division, exec roll-up
+uv run python -m deep_research_agent report --dry-run              # research only
+uv run python -m deep_research_agent report --reader-only          # exercise the refusal path
 
 # The face-to-user deployment: no domain, any question, streamed as it works.
-uv run python examples/ask.py "Why did our Q3 lead times slip?"
-uv run python examples/ask.py --read-only "What do we know about the auth rewrite?"
+uv run python -m deep_research_agent ask "Why did our Q3 lead times slip?"
+uv run python -m deep_research_agent ask --read-only "What do we know about the auth rewrite?"
 
-uv run python examples/run_service.py                       # A2A server + scheduler, same process
+uv run python -m deep_research_agent serve                       # A2A server + scheduler, same process
 curl http://localhost:8000/.well-known/agent-card.json | jq
 
 # Send it a task. The A2A-Version header and the body shape go together:
@@ -164,6 +183,12 @@ Scheduled and on-demand runs are the same agent with a different `Principal`
 the executive roll-up while a user only ever sees their own division. See
 [`DESIGN.md`](docs/design/DESIGN.md) §5.3.
 
+Running from outside a checkout (a container, a cron entry in another
+directory) works without arguments: the project root is found by walking up
+for a checkout marker and falls back to the working directory. Set
+`PATHS_PROJECT_ROOT` (where `skills/` lives) and `PATHS_FIXTURES` when neither
+applies.
+
 Each of the above needs real `LLM_API_KEY` credentials and calls the model —
 see [`docs/RUNBOOK.md`](docs/RUNBOOK.md) §3 for what to expect from each one
 and how to confirm it actually worked (which namespace a report landed in,
@@ -173,7 +198,7 @@ scheduler survive running together).
 ## Test
 
 ```bash
-uv run pytest              # 235 tests, no credentials required
+uv run pytest              # 252 tests, no credentials required
 ```
 
 Coverage: namespace authorization, clearance-gated namespaces, the

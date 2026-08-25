@@ -72,7 +72,7 @@ uv add --group dev <package>     # 加一個新的 dev 依賴
 ```bash
 uv sync --group dev          # 第一次設置，或 pyproject.toml/uv.lock 有變動後同步
 uv run pytest                # 在 venv 裡跑指令，不用 source activate
-uv run python examples/run_report.py
+uv run python -m deep_research_agent report
 
 uv add fastapi                 # 加執行期依賴
 uv add --group dev ruff        # 加開發依賴

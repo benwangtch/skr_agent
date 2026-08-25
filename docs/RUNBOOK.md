@@ -18,17 +18,28 @@ src/deep_research_agent/
   observability.py                     Langfuse trace（預設關閉）
   core/                                agent 本體，不含任何主題知識
   domains/supply_chain/                供應鏈主題包：BOM/news 來源、investigator、rubric
-  config/                              env-driven 設定（llm/mcp/langfuse 有接上；db/minio 是佔位）
+  config/                              env-driven 設定（llm/mcp/langfuse/paths 有接上；db/minio 是佔位）
   wiki/                                core 一定掛的來源，唯一有授權模型的那個
   serving/                             A2A server（streaming）+ cron-like scheduler
+  __main__.py                          python -m deep_research_agent <command>
+  cli/
+    ask.py                             face-to-user 形態：domain=None，問任何事
+    report.py                          排程形態：掛供應鏈 domain，跑一次掃描
+    serve.py                           同時跑 A2A server + 排程
+    check.py                           花 token 前先驗設定（有問題 exit 1）
 fixtures/                              4 家公司、5 頁 wiki（namespace: supply / platform / shared）、4 份原始週報
-examples/
-  run_report.py                        排程形態：掛供應鏈 domain，跑一次掃描
-  ask.py                               face-to-user 形態：domain=None，問任何事
-  run_service.py                       同時跑 A2A server + 排程
-  check_setup.py                       花 token 前先驗設定
-tests/                                 235 個測試，9 個檔案，全部不需要金鑰
+tests/                                 252 個測試，10 個檔案，全部不需要金鑰
 ```
+
+入口點在**套件裡面**不是 `examples/`——它們不是示範，是這個東西實際的跑法，而且容器要的是「裝好」不是「clone 下來」。四個指令共用一個 dispatcher：
+
+```bash
+uv run python -m deep_research_agent          # 列出所有指令
+uv run python -m deep_research_agent ask --help
+uv run python -m deep_research_agent.cli.ask --help   # 單獨跑也可以，等價
+```
+
+從 checkout 以外的地方跑（容器、別的目錄下的 cron）不用給參數：project root 會往上找 checkout 標記，找不到就退回工作目錄。兩者都不適用時設 `PATHS_PROJECT_ROOT`（`skills/` 在哪）和 `PATHS_FIXTURES`。
 
 **兩種部署形態共用同一個 agent**，差別只有 `build_mesh(domain=...)`：排程跑的是已知任務（掛 domain），使用者問的是未知任務（`domain=None`）。詳見 DESIGN §3.4。
 
@@ -65,7 +76,7 @@ uv run python -c "from deep_research_agent.config import get_llm; l=get_llm(); p
 一個指令看完 LLM / MCP / skills 三層設定，**不花 token**：
 
 ```bash
-uv run python examples/check_setup.py
+uv run python -m deep_research_agent check
 ```
 
 它會印出 provider、base_url、model、金鑰有沒有設、每個 MCP server 連不連得上以及它給了哪些 tool、載了哪些 skill、還有哪些 skill 放在資料夾裡但沒被載入。有問題就 exit code 1，所以也可以拿來當部署前的 gate。
@@ -73,7 +84,7 @@ uv run python examples/check_setup.py
 **設定看起來對 ≠ endpoint 真的活著。** 要真的打一次模型（花費可忽略，但這是唯一能證明 base_url + 金鑰真的能用的方法）：
 
 ```bash
-uv run python examples/check_setup.py --llm
+uv run python -m deep_research_agent check --llm
 ```
 
 MCP 連不上時預設只印一行結論，加 `-v` 才會印底層的例外（httpx / anyio 那一長串 traceback 在這裡只會蓋掉重點）。
@@ -83,7 +94,7 @@ MCP 連不上時預設只印一行結論，加 `-v` 才會印底層的例外（h
 ## 2. 跑單元測試（不花錢、不用金鑰）
 
 ```bash
-uv run pytest              # 235 個測試，約 11 秒
+uv run pytest              # 252 個測試，約 18 秒
 uv run pytest -q tests/test_wiki_authz.py     # 只跑某個檔案
 uv run pytest -k aggregation                  # 只跑名字符合的測試
 ```
@@ -93,6 +104,7 @@ uv run pytest -k aggregation                  # 只跑名字符合的測試
 | `test_wiki_authz.py`（32） | namespace 授權、clearance-gated namespace、aggregation leak 檢查 |
 | `test_mesh.py`（15） | agent-as-tool 的 principal 綁定、citation 傳遞、拒絕處理 |
 | `test_wiring.py`（55） | 每個 agent 的 tool 清單、沒有 subagent 能發布（兩種部署形態都驗）、fact-checker 沒有 search tool、scratchpad/停止條件/矛盾處理有進 prompt、import 風格 |
+| `test_cli.py`（17） | 四個入口都 import 得起來且 `--help` 能跑、project root/fixtures 的解析（含從 checkout 以外的目錄） |
 | `test_general_agent.py`（24） | 沒有 domain 也是完整形態、domain 只能加不能放寬規則、tool 能力宣告與 fail-closed 預設 |
 | `test_config.py`（22） | LLM config 的 provider 預設值、env var 覆蓋、chat model 建構 |
 | `test_scheduler.py`（19） | cron 排程時序、job 失敗互不影響、hook 觸發 |
@@ -111,7 +123,7 @@ uv run pytest -k aggregation                  # 只跑名字符合的測試
 ### 3.1 最小驗證：問一句話，不動 wiki
 
 ```bash
-uv run python examples/run_report.py --dry-run --tier critical
+uv run python -m deep_research_agent report --dry-run --tier critical
 ```
 
 預期看到（`-v` 開 log 更清楚）：
@@ -125,7 +137,7 @@ uv run python examples/run_report.py --dry-run --tier critical
 ### 3.2 使用者觸發：產出一份報告並存檔
 
 ```bash
-uv run python examples/run_report.py --division supply --tier critical --out example-report.md
+uv run python -m deep_research_agent report --division supply --tier critical --out example-report.md
 ```
 
 跟 3.1 的差別：沒有 `--dry-run`，agent 會真的呼叫 `wiki_write_page` 發布。觸發者是 `user_principal("demo.user@supply", "supply", roles={wiki.reader, wiki.writer})`，所以報告會寫進 `supply` namespace（不是 `exec`）。
@@ -157,7 +169,7 @@ uv run python examples/run_report.py --division supply --tier critical --out exa
 ### 3.3 驗證權限真的有擋：唯讀使用者不能發布
 
 ```bash
-uv run python examples/run_report.py --reader-only
+uv run python -m deep_research_agent report --reader-only
 ```
 
 預期：agent 會嘗試發布，被 `wiki_write_page` 拒絕（因為這個 principal 沒有 `wiki.writer` role），然後**agent 會照 prompt 指示回報「內容做完了但沒發布，因為權限不足」，而不是想辦法繞過去**。這是 `core/prompt.py` 系統提示裡明講的行為，值得在這步實際確認 agent 真的照做，而不是只看程式碼寫了什麼。
@@ -165,7 +177,7 @@ uv run python examples/run_report.py --reader-only
 ### 3.4 排程帳號：驗證跨部門彙整 + exec namespace
 
 ```bash
-uv run python examples/run_report.py --scheduled -v 2>&1 | grep -E "wiki.write|wiki namespaces"
+uv run python -m deep_research_agent report --scheduled -v 2>&1 | grep -E "wiki.write|wiki namespaces"
 ```
 
 預期：`service_principal()` 掃全部 BOM（不只 critical tier），如果報告內容橫跨多個 division，應該寫進 `exec` namespace，不是 `shared` 或任何單一 division——這是 `WikiAuthorizer.check_aggregation` 在擋的東西（design doc §5）。如果看到它寫進了 `shared`，那是真的 bug，不是預期行為。
@@ -173,19 +185,19 @@ uv run python examples/run_report.py --scheduled -v 2>&1 | grep -E "wiki.write|w
 ### 3.5 單一提問：驗證 agent 自己會挑對工具
 
 ```bash
-uv run python examples/run_report.py --ask "What is our exposure on the ASC-4400 controller?"
+uv run python -m deep_research_agent report --ask "What is our exposure on the ASC-4400 controller?"
 ```
 
 預期：agent 判斷這題用 `wiki_search` / `wiki_read_page` 就夠（fixtures 裡 `supply/acme-semiconductor` 本來就提到 ASC-4400 是單一供應商），**不需要**把整份 BOM 掃一遍、也不需要外部新聞搜尋。用 `-v` 看它實際呼叫了哪些 tool：
 
 ```bash
-uv run python examples/run_report.py --ask "..." -v 2>&1 | grep -i "tool"
+uv run python -m deep_research_agent report --ask "..." -v 2>&1 | grep -i "tool"
 ```
 
 如果它對這種純內部查詢也去跑完整 sweep，代表 `core/prompt.py` 的 system prompt 需要調整——這是驗證「deep research agent 會不會把力氣花在不需要的地方」的地方。對照組：
 
 ```bash
-uv run python examples/run_report.py --ask "What happened with our suppliers this week?"
+uv run python -m deep_research_agent report --ask "What happened with our suppliers this week?"
 ```
 
 這句需要外部研究，應該會看到 `search_news` / `fetch_article` 出現。
@@ -195,8 +207,8 @@ uv run python examples/run_report.py --ask "What happened with our suppliers thi
 前面每一步都掛著供應鏈 domain（因為那是排程要跑的已知任務）。這一步驗的是另一種部署形態：**使用者打字問一個沒人預先設計過的問題**。
 
 ```bash
-uv run python examples/ask.py "What do we know about the auth rewrite?"
-uv run python examples/ask.py --read-only "Why did our Q3 lead times slip?"
+uv run python -m deep_research_agent ask "What do we know about the auth rewrite?"
+uv run python -m deep_research_agent ask --read-only "Why did our Q3 lead times slip?"
 ```
 
 差別只在 `build_mesh(domain=None)`。預期：
@@ -233,7 +245,7 @@ for label, dom in (('scheduled', ...), ('face-to-user', None)):
 開一個 terminal：
 
 ```bash
-uv run python examples/run_service.py --port 8000 --cron "*/5 * * * *" -v
+uv run python -m deep_research_agent serve --port 8000 --cron "*/5 * * * *" -v
 ```
 
 （`--cron "*/5 * * * *"` 是為了測試用，每 5 分鐘跑一次；正式環境用預設的 `0 8 * * 1`，週一早上 8 點 UTC。）
@@ -303,7 +315,7 @@ MCP_TOKEN=內部服務發的憑證
 **先確認 tool 真的載得到，不必叫模型、不花 token：**
 
 ```bash
-uv run python examples/check_setup.py
+uv run python -m deep_research_agent check
 ```
 
 MCP 那一段預期看到：
@@ -319,7 +331,7 @@ MCP
 **接著跑一次真的 agent**，確認模型看得到、也會用：
 
 ```bash
-uv run python examples/run_report.py --ask "<一個需要用到你 MCP tool 的問題>" -v
+uv run python -m deep_research_agent report --ask "<一個需要用到你 MCP tool 的問題>" -v
 ```
 
 預期：開頭印出 `→ MCP tools loaded from configured server(s)`，最後的 `--- citations ---` 區塊裡有 `mcp://<server>/<tool>` 這種 ref——**那就是 MCP 真的被呼叫過的證據**，模型只是嘴上說有用不會產生這個 citation。
@@ -423,7 +435,7 @@ print('prompt chars:', len(p))
 - A2A server 跟排程可以在同一個 process 穩定跑，外部呼叫走得通（3.6）
 - （若有設定）MCP tool 載得到、模型會用、而且留下 `mcp://` citation（3.7）
 
-這六步涵蓋了 `docs/design/DESIGN.md` §9 列出的「已知限制」之外的核心行為。**沒有自動化的 e2e 測試**（§2 的 235 個測試都用 stub，不叫真的模型）——這是刻意的，因為每次 CI 跑都花 token、還會因為模型輸出的隨機性讓測試不穩定。真要把 §3 這幾步自動化，做法是寫一支跑在 CI 之外（例如手動觸發或排程跑一次）的 smoke test script，判準改成寬鬆的（例如「有沒有 citations」而不是「內容逐字符合」）——這份文件目前先提供人工跑過一遍的步驟，還沒做那支腳本。
+這六步涵蓋了 `docs/design/DESIGN.md` §9 列出的「已知限制」之外的核心行為。**沒有自動化的 e2e 測試**（§2 的 252 個測試都用 stub，不叫真的模型）——這是刻意的，因為每次 CI 跑都花 token、還會因為模型輸出的隨機性讓測試不穩定。真要把 §3 這幾步自動化，做法是寫一支跑在 CI 之外（例如手動觸發或排程跑一次）的 smoke test script，判準改成寬鬆的（例如「有沒有 citations」而不是「內容逐字符合」）——這份文件目前先提供人工跑過一遍的步驟，還沒做那支腳本。
 
 ## 5. 常見卡住的地方
 
