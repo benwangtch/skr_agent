@@ -11,7 +11,18 @@
 
 ## 1. 這是什麼
 
-**這是一個 deep research agent。** 它接開放式問題（「這週供應鏈有什麼事」、「ASC-4400 的曝險多少」），自己決定要挖多深，跨多個資料來源交叉比對，產出**每個主張都有出處**的報告，並發布到內部 wiki。
+**這是一個 deep research agent。** 它接開放式問題，自己決定要挖多深，跨多個資料來源交叉比對，產出**每個主張都有出處**的報告，並可發布到內部 wiki。
+
+它不綁定任何特定主題。實務上有兩種部署形態，用的是同一個 agent：
+
+| | 已知任務、排程跑 | 未知任務、使用者輸入 |
+|---|---|---|
+| 例子 | 每週供應鏈掃描 | 使用者打字問任何事 |
+| 組法 | `build_mesh(domain=supply_chain.from_fixtures)` | `build_mesh(domain=None)` |
+| 多了什麼 | BOM/新聞來源、`company-investigator`、嚴重度 rubric | 什麼都沒多 |
+| 入口 | `serving/scheduler.py`、`examples/run_report.py` | A2A、`examples/ask.py` |
+
+**`domain=None` 是完整形態，不是降級形態。** 讓它擅長研究的東西（§4 那四個設計）全都在 core，兩種形態都有。domain 只會**加**東西，不能拿掉也不能放寬任何規則——§3.4。
 
 它可以被三種方式觸發，走的是同一條程式碼路徑：
 
@@ -30,6 +41,8 @@
 | 問題 | 決定 | 理由 |
 |---|---|---|
 | 執行框架 | LangChain **`deepagents`**（LangGraph 之上） | 內建 planning/todo、context 摘要、subagent 委派、virtual filesystem——§3.1 |
+| 主題知識放哪 | `core/` 通用 + `domains/<name>/` 主題包，**domain 可有可無** | 排程是已知任務、face-to-user 是未知任務，同一個 agent 要吃下兩種——§3.4 |
+| subagent 拿得到哪些 tool | 由 **tool 自己宣告能力**決定，不是寫死名單 | 掛了 domain 和 MCP 之後，名單永遠不可能完整——§3.5 |
 | 模型怎麼接 | LangChain `BaseChatModel`，由 `config/llm.py` 建 | 不綁 wire protocol，內部 gateway 有 OpenAI-compatible endpoint 就能接——§6 |
 | 怎麼讓它擅長 deep research | scratchpad + 發布前 fact-checker + 停止條件 + 矛盾攤開 | 框架只給 loop 和委派，研究品質是這四個決定堆出來的——§4 |
 | 報告規範怎麼載入 | inline 進 system prompt，不用 `skills=` 的按需載入 | 必須遵守的規範不該靠模型記得去讀檔——§3.3 |
@@ -84,13 +97,69 @@ serving/        怎麼被外部觸發到。
 
 - **你自己維護、放在別處**：`SKILLS_PATH` 指到裝著它的目錄，`SKILLS_ENABLED` 寫名字。不改程式碼，也不留一份會跟原始檔不一致的複製品。同名時 `SKILLS_PATH` 蓋過內建的。
 - **直接給路徑**：`skills=["incident-report", "/abs/path/to/x"]`，名字含 `/` 或結尾 `.md` 就當路徑讀。
-- **屬於這個 repo（排程用的走這條）**：建 `skills/<name>/SKILL.md`，名字加進 `DEFAULT_SKILLS`。排程是無人看管的，規範必須跟程式碼一起版控、一起 review，否則 job 的行為可能在沒有任何 commit 的情況下改變。
+- **屬於這個 repo（排程用的走這條）**：建 `skills/<name>/SKILL.md`，名字加進該 domain 的 `skills`（供應鏈的在 `domains/supply_chain/agent.py`）。排程是無人看管的，規範必須跟程式碼一起版控、一起 review，否則 job 的行為可能在沒有任何 commit 的情況下改變。
 
 skill 資料夾是 `skills/`（不是 `.claude/skills/`——那是這個專案還跑在 Claude Agent SDK 上時的殘留，現在仍然找得到但不是主要位置）。一個排程 job 依賴的規範是**版控的商業邏輯**，藏在以工具命名的隱藏目錄裡就不會有人 review 它。
 
-放進資料夾但沒有被載入的 skill，`build_deep_research_agent` 會 log 一行 warning 點名它——資料夾慣例的失敗模式就是「看起來裝好了，其實沒有」。
+放進資料夾但沒有被載入的 skill，`build_research_agent` 會 log 一行 warning 點名它——資料夾慣例的失敗模式就是「看起來裝好了，其實沒有」。這行 warning **只在有掛 domain 時發**：沒有 domain 的通用 agent，repo 裡的 rubric 沒被用到是正常狀態，每次跑都警告只會讓人學會忽略警告。
 
 `SKILLS_ENABLED` 是附加不是取代——一個能安靜關掉報告 rubric 的環境變數是個陷阱。找不到 skill 會 raise 並列出每個找過的路徑，不會安靜跳過。
+
+### 3.4 core 與 domain
+
+```
+core/          跟主題無關的部分
+  prompt.py      研究方法、證據紀律、停止條件、查核、發布規則（分段組裝）
+  subagents.py   general-purpose + fact-checker
+  domain.py      ResearchDomain / Specialist 兩個 dataclass
+  agent.py       build_research_agent(domain=None)
+
+capabilities.py  tool 能力宣告（§3.5），跟 protocol.py 同層的葉子模組
+
+domains/
+  supply_chain/  BOM 與新聞來源、company-investigator、incident-report rubric
+```
+
+**判準：這段文字換成專利研究、法規研究、事故調查，還成不成立？** 成立的放 core，不成立的放 domain。「讀完再引用」「兩個來源打架要攤開」到處都成立；「別名很重要，事故常掛在母公司名下」只在供應鏈成立。
+
+一個 `ResearchDomain` 只提供五樣東西，全部是**加法**：
+
+| 欄位 | 加了什麼 |
+|---|---|
+| `briefing` | 一段 prompt，插在通用角色之後、通用方法之前 |
+| `toolsets` | 這個主題自己的資料來源 |
+| `specialists` | 懂這個主題子任務形狀的 subagent |
+| `skills` | 輸出必須遵守的 rubric |
+| `inputs` | agent input schema 多出來的結構化欄位（排程呼叫端用） |
+
+**domain 不能放寬任何規則。** specialist 宣告要哪些 tool 只是「請求」不是「授權」——core 會再過一次唯讀檢查（§3.5），要到寫入 tool 的會被丟掉並 log。有測試直接建一個貪心 domain 驗這件事。
+
+沒有 domain 時，prompt 裡的 `# Publishing` 那段會依照有沒有寫入 tool 決定要不要出現——描述一個不存在的 tool 等於教模型幻覺呼叫。
+
+**加新主題是加一個 `domains/` 底下的 sibling package，不是改 `core/`。** 如果你為了加 domain 而必須改 core，那個東西大概本來就是通用的，該憑自己的道理放進 core。
+
+### 3.5 tool 能力宣告
+
+兩個安全性質要在**沒人列舉過的 tool 表面**上成立：只有頂層 agent 能改東西；fact-checker 不能去找新資料。
+
+舊寫法是在 agent 模組裡手寫 tool **名字**清單。那只在「一個 domain、一組固定 tool」下成立；多一個 domain 或一台 MCP server，清單就默默不完整了，而不完整的後果是某個 subagent 安靜地拿到會改狀態的 tool。
+
+所以能力搬到 tool 上，兩個軸：
+
+```python
+lookup(tool)     # 唯讀，取一個具名的東西    → 誰都可以，包含 fact-checker
+search(tool)     # 唯讀，用 query 找出新東西  → 研究用 subagent，不給 checker
+mutating(tool)   # 會改外面的狀態            → 只有頂層 agent
+```
+
+`fact-checker` 拿的是全部 `lookup`，`general-purpose` 拿的是全部唯讀。不是名字比對，是 metadata 過濾。
+
+**沒宣告 = 當成會改狀態。** 這是預設方向的選擇：猜錯一邊只是 subagent 少一個 tool，猜錯另一邊是一次沒有查核關卡的未宣告寫入。MCP tool 因此天生被擋在所有 subagent 外——那正是我們對它的真實知識狀態。確認某個 MCP tool 安全之後，讓它經過 `lookup()`/`search()` 再進來。
+
+實測過兩件事：
+
+- **忘記宣告不會破功。** 把 `wiki_write_page` 的 `mutating()` 拿掉，235 個測試仍然全綠——因為 fail-closed，未宣告一樣被擋。
+- **宣告錯會被抓到。** 把它改宣告成 `search()`，**7 個測試變紅**，其中包含從 `SubAgentMiddleware` 實際收到的清單去驗的那幾個。
 
 ---
 
@@ -108,15 +177,15 @@ skill 資料夾是 `skills/`（不是 `.claude/skills/`——那是這個專案�
 
 一個容易誤解的地方：`company-investigator` 「建構上唯讀」指的是**對 wiki 唯讀**（拿不到 `wiki_write_page`，那才是有授權意義的邊界）。它對虛擬檔案系統一直有寫入權——`deepagents` 不管 `tools` 給什麼，都會給每個 subagent 一份 `FilesystemMiddleware`。
 
-### 4.1b 三個 subagent，沒有一個能發布
+### 4.1b 沒有任何 subagent 能發布
 
-`general-purpose` / `company-investigator` / `fact-checker`，各自拿一份明確白名單，**都不含 `wiki_write_page`**。只有頂層 agent 能發布，所以 §4.2 的查核關卡繞不過去。
+固定兩個 core subagent（`general-purpose`、`fact-checker`），加上 domain 提供的 specialist（供應鏈是 `company-investigator`）。**沒有一個拿得到 `wiki_write_page`**——不是靠白名單，是靠 §3.5 的能力過濾。只有頂層 agent 能發布，所以 §4.2 的查核關卡繞不過去。
 
 `general-purpose` 是刻意保留的：把一個獨立的子問題丟進一個乾淨的 context window 去查，對開放式研究很有用——模型可以自己寫指示、自己決定要委派什麼。它只是不能發布。
 
-**這一段是修正過的。** `deepagents` 在呼叫端沒有宣告同名 subagent 時，會**自動插入一個 `general-purpose`，而它繼承主 agent 的全部 tool——包含 `wiki_write_page`**。於是「只有頂層 agent 能發布」跟「發布前必過 fact-checker」兩個不變式同時被破掉，而當時的測試只檢查我們自己宣告的清單，看不到框架加的那個，所以一直是綠的。現在我們自己宣告 `general-purpose`（覆蓋掉自動的那個），測試也改成從 `SubAgentMiddleware` 實際收到的清單去驗——框架未來再自動加什麼，會被抓到。
+**這一段是修正過的。** `deepagents` 在呼叫端沒有宣告同名 subagent 時，會**自動插入一個 `general-purpose`，而它繼承主 agent 的全部 tool——包含 `wiki_write_page`**。於是「只有頂層 agent 能發布」跟「發布前必過 fact-checker」兩個不變式同時被破掉，而當時的測試只檢查我們自己宣告的清單，看不到框架加的那個，所以一直是綠的。現在我們自己宣告 `general-purpose`（覆蓋掉自動的那個），測試也改成從 `SubAgentMiddleware` 實際收到的清單去驗——框架未來再自動加什麼，會被抓到。**`domain=None` 的形態也有同一組驗證**，因為那是最可能在沒人 review 這份清單的地方被組起來的形態。
 
-**`report/agent.py` 的 `subagents()` 裡不能拿掉 `general-purpose`**：拿掉它，框架就會把有寫入權的那個放回來。
+**`core/subagents.py` 的 `core_subagents()` 裡不能拿掉 `general-purpose`**：拿掉它，框架就會把有寫入權的那個放回來。
 
 ### 4.2 發布前必過 fact-checker
 
@@ -133,9 +202,9 @@ Deep research 最常見的失敗不是查不到，是**寫出一句看起來合�
 
 「什麼時候算查完」不寫的話，模型會往兩個方向失敗：抓到第一個看起來對的答案就收工，或一直挖不知道停。草擬前的檢查點：
 
-- 範圍內哪些公司沒有 finding 檔案？（那是缺口，不是乾淨結果）
+- 原本要涵蓋的東西裡，哪些沒有 finding？（那是缺口，不是乾淨結果）
 - 哪些宣稱只有單一來源？
-- 什麼資訊會改變嚴重度判斷？便宜的話就去查。
+- 什麼資訊會改變你的結論？便宜的話就去查。
 
 **是檢查不是儀式**——沒缺就說沒缺然後往下走。
 
@@ -147,26 +216,31 @@ Deep research 最常見的失敗不是查不到，是**寫出一句看起來合�
 
 ## 5. 資料來源與授權
 
-### 5.1 四個來源，地位平等
+### 5.1 來源地位平等
 
 ```
-┌─────────────────────────────────────────────────────────────┐
-│              deep research agent (report/agent.py)           │
-│                                                              │
-│  BOM              list_bom_companies / get_bom_company       │
-│  外部新聞          search_news / fetch_article                 │
-│  內部 wiki         wiki_search / wiki_read_page /             │
-│                   wiki_write_page      ← 唯一有授權模型的來源    │
-│  MCP server(s)    你設定的任何 tool（預設無）  ← 身份不傳，見 5.5  │
-│                                                              │
-│  subagents: general-purpose / company-investigator /          │
-│             fact-checker —— 三個都拿不到 wiki_write_page        │
-└─────────────────────────────────────────────────────────────┘
+┌──────────────────────────────────────────────────────────────┐
+│           deep research agent (core/agent.py)                 │
+│                                                               │
+│  core 一定掛：                                                  │
+│    內部 wiki      wiki_search(search) / wiki_read_page(lookup) │
+│                   / wiki_write_page(mutating)                 │
+│                                    ← 唯一有授權模型的來源         │
+│  domain 選配（供應鏈為例）：                                       │
+│    BOM           list_bom_companies(search) /                 │
+│                  get_bom_company(lookup)                      │
+│    外部新聞       search_news(search) / fetch_article(lookup)   │
+│  MCP server(s)   你設定的任何 tool（預設無）                       │
+│                                    ← 未宣告，身份不傳，見 5.5      │
+│                                                               │
+│  subagents 拿到什麼由括號裡的能力決定，不由名字決定                    │
+│    general-purpose  全部唯讀        fact-checker  全部 lookup    │
+└──────────────────────────────────────────────────────────────┘
 ```
 
-一份有價值的報告需要交叉比對：只看新聞會把三個月前就記錄過的舊事當新聞，只看 wiki 永遠不知道外面發生什麼。
+一份有價值的報告需要交叉比對：只看新聞會把三個月前就記錄過的舊事當新聞，只看內部記錄永遠不知道外面發生什麼。
 
-**wiki 在程式碼上獨立成一個 package，只因為它是唯一有授權模型的來源。** BOM 和新聞對所有觸發者都一樣，wiki 不是。這個不對稱是 5.2–5.4 的全部內容。
+**wiki 由 core 掛而不是由 domain 掛**，因為「內部已經知道什麼」和「做完的東西放哪」是每個研究任務都有的問題，包含一個對不上任何 domain 的使用者提問。它在程式碼上獨立成一個 package，只因為它是唯一有授權模型的來源——這個不對稱是 5.2–5.4 的全部內容。
 
 ### 5.2 wiki 為什麼不是 agent
 
@@ -222,7 +296,7 @@ check_aggregation(target, sources)        # 聚合 ← 這個
 >
 > **只接「這個 agent 權限最低的呼叫者也可以看到全部內容」的 MCP server。** 如果那個 service 有 per-user 規則，現在這個接法會繞過它。要修就得改成 per-request 建 client 帶終端使用者的 token。
 
-MCP tool **不給 subagent**：`company-investigator` 拿的是寫死的白名單，而我們無從得知某個 MCP tool 會不會改狀態。確認安全後把名字加進 `INVESTIGATOR_TOOLS` 即可。
+MCP tool **不給任何 subagent**，而且這件事現在是自動的：它們沒有經過 §3.5 的能力宣告，未宣告一律當成會改狀態。這正是我們對它的真實知識狀態——我們無從得知某個 MCP tool 會不會改東西。確認某個 tool 安全之後，在包裝時讓它經過 `lookup()` 或 `search()`，它就會自動出現在對應的 subagent 手上。
 
 ---
 
@@ -345,7 +419,7 @@ Scheduler(jobs).run_forever(poll_interval=30)
 ```python
 mcp_toolset = await mcp_toolset_from_config()          # 啟動時一次
 mesh = build_mesh(..., extra_toolsets=[mcp_toolset] if mcp_toolset else ())
-app = build_a2a_app(mesh.report_agent, url=..., registry=mesh.registry)
+app = build_a2a_app(mesh.agent, url=..., registry=mesh.registry)
 await asyncio.gather(
     uvicorn.Server(...).serve(),
     Scheduler(default_jobs(mesh, cron=cron)).run_forever(...),
@@ -359,10 +433,11 @@ await asyncio.gather(
 ## 8. 測試策略
 
 ```
-210 個測試，全部不需要金鑰、不呼叫模型
+235 個測試，全部不需要金鑰、不呼叫模型
+  test_wiring.py      55   tool 清單、subagent 邊界、deep research 結構、報告取回、skill 載入、import 風格
   test_wiki_authz.py  32   namespace 授權、clearance、aggregation leak
   test_a2a_server.py  32   executor 生命週期 + 6 個走真 handler/HTTP 的整合測試
-  test_wiring.py      54   tool 清單、subagent 邊界、deep research 結構、報告取回、skill 載入、import 風格
+  test_general_agent.py 24 無 domain 也完整、domain 只能加不能放寬、能力宣告與 fail-closed
   test_config.py      22   provider 預設、env 覆蓋、chat model 形狀
   test_scheduler.py   19   cron 時序、失敗隔離
   test_observability.py 19  Langfuse 設定、降級、trace metadata、MCP 標記
@@ -375,6 +450,7 @@ await asyncio.gather(
 - **不呼叫模型。** 測的是接縫（授權規則、principal 解析、排程時序、訊息轉換）。每次 CI 花 token、又因模型隨機性而不穩定的測試不值得。真的跑一次的步驟在 RUNBOOK §3。
 - **MCP 測試跑真的 MCP server subprocess**，不 mock client——會壞的是跟 `langchain-mcp-adapters` 的契約，mock 那個契約只是把自己的假設複述一遍。用 `-m "not mcp_server"` 可跳過。
 - **A2A 有整合測試走真的 handler + HTTP。** 因為 unit test 結構上抓不到 §7.3 那個 bug。
+- **安全規則靠「弄壞它」驗過，不只是靠測試存在。** 拿掉 `wiki_write_page` 的 `mutating()` 宣告 → 全綠（fail-closed 本來就擋）；把它錯宣告成 `search()` → 7 個測試變紅。一個從沒紅過的安全測試等於沒有安全測試。
 
 ---
 
@@ -386,7 +462,7 @@ await asyncio.gather(
 2. **MCP 不傳遞使用者身份**（§5.5）。這是目前最需要注意的一條。
 3. **排程憑證怎麼發還沒定。** `service_principal()` 現在是函式呼叫，production 要決定從哪來、怎麼輪替、怎麼吊銷。
 4. **`clearance` 寫死在 `WikiAuthorizer` 建構子裡。** 真有多個 gated namespace 時要變設定檔或從身分系統查。
-5. **BOM 與新聞沒有授權模型。** 目前假設能觸發這個 agent 的人都能看整份 BOM。之後要分級的話照 §5.2 的形狀補一個 `authz.py`，不要在 prompt 裡叫 agent 自己小心。
+5. **domain 的來源沒有授權模型。** 供應鏈的 BOM 與新聞目前假設能觸發這個 agent 的人都能看全部。之後要分級的話照 §5.2 的形狀在該 domain 裡補一個 `authz.py`，不要在 prompt 裡叫 agent 自己小心。
 
 **研究品質**
 
@@ -407,11 +483,16 @@ await asyncio.gather(
 
 ## 10. 給要新增 feature 的人
 
-三個問題，順序很重要：
+四個問題，順序很重要：
 
-1. **需要授權嗎？** 需要 → 規則寫進一個 `authz.py`，掛成 tool（§5.2 的形狀），**不要預設包一個 agent**。
-2. **步驟數事先可知嗎？** 不可知 → `DeepAgent`；可知 → 直接呼叫 chat model，不要為了「架構一致」硬套 agent。
-3. **會被多種 principal 呼叫嗎？**（使用者／排程／第三方）會 → 現在就把各自的 grant 寫清楚（像 `principals.py`），不要假設「輸入一樣，輸出應該也一樣」——那個假設就是 §5.4 那個洞的來源。
+1. **這件事只對某個主題成立，還是對研究普遍成立？** 普遍 → `core/`；只對某主題 → `domains/<name>/`。判準見 §3.4：把句子裡的「供應商」換成「專利」還成不成立。
+2. **需要授權嗎？** 需要 → 規則寫進一個 `authz.py`，掛成 tool（§5.2 的形狀），**不要預設包一個 agent**。
+3. **步驟數事先可知嗎？** 不可知 → `DeepAgent`；可知 → 直接呼叫 chat model，不要為了「架構一致」硬套 agent。
+4. **會被多種 principal 呼叫嗎？**（使用者／排程／第三方）會 → 現在就把各自的 grant 寫清楚（像 `principals.py`），不要假設「輸入一樣，輸出應該也一樣」——那個假設就是 §5.4 那個洞的來源。
+
+**新增一個 tool**：用 `capabilities.py` 的 `lookup()` / `search()` / `mutating()` 宣告它能做什麼。不宣告是安全的但很受限——未宣告當成會改狀態，任何 subagent 都看不到它。
+
+**新增一個主題**：在 `domains/` 下加一個 sibling package，回傳一個 `ResearchDomain`。`core/` 不該有任何改動。
 
 新增一個 IO service：複製 `config/db.py` 的形狀（一個檔案、一個 class、一個 `env_prefix`、一個 cached getter、在 `__init__.py` 匯出）。
 

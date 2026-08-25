@@ -1,9 +1,15 @@
-"""Toolset factories for the agent's BOM and news data sources.
+"""Toolset factories for the supply-chain domain's BOM and news data sources.
 
 A factory takes a ``ToolContext`` (principal + citation sink) and returns tools
 bound to it. This is why they are functions rather than module-level
 singletons: the principal has to be baked into the closure so the model cannot
 supply it.
+
+Every tool is wrapped in a capability declaration — ``lookup`` for "fetch this
+named thing", ``search`` for "find things matching a query". That is what lets
+the core hand the right subset to a subagent without knowing any of these tool
+names, and it is why the fact-checker gets ``get_bom_company`` and
+``fetch_article`` but not ``search_news``. See ``core.capabilities``.
 """
 
 from __future__ import annotations
@@ -12,9 +18,10 @@ from dataclasses import asdict
 
 from langchain_core.tools import BaseTool, StructuredTool
 
+from deep_research_agent.capabilities import lookup, search
 from deep_research_agent.protocol import Citation
 from deep_research_agent.runtime import ToolBundle, ToolContext
-from deep_research_agent.report.sources import BomSource, NewsFeed
+from deep_research_agent.domains.supply_chain.sources import BomSource, NewsFeed
 
 __all__ = ["make_bom_toolset", "make_news_toolset"]
 
@@ -47,7 +54,8 @@ def make_bom_toolset(bom: BomSource):
             return str(asdict(company))
 
         tools: list[BaseTool] = [
-            StructuredTool.from_function(
+            # Discovers: it is how you find out which companies exist at all.
+            search(StructuredTool.from_function(
                 coroutine=list_bom_companies,
                 name="list_bom_companies",
                 description=(
@@ -64,8 +72,8 @@ def make_bom_toolset(bom: BomSource):
                         }
                     },
                 },
-            ),
-            StructuredTool.from_function(
+            )),
+            lookup(StructuredTool.from_function(
                 coroutine=get_bom_company,
                 name="get_bom_company",
                 description=(
@@ -78,7 +86,7 @@ def make_bom_toolset(bom: BomSource):
                     "properties": {"company_id": {"type": "string"}},
                     "required": ["company_id"],
                 },
-            ),
+            )),
         ]
         return tools
 
@@ -119,7 +127,7 @@ def make_news_toolset(feed: NewsFeed):
             )
 
         tools: list[BaseTool] = [
-            StructuredTool.from_function(
+            search(StructuredTool.from_function(
                 coroutine=search_news,
                 name="search_news",
                 description=(
@@ -136,8 +144,11 @@ def make_news_toolset(feed: NewsFeed):
                     },
                     "required": ["query"],
                 },
-            ),
-            StructuredTool.from_function(
+            )),
+            # A lookup, not a search: it retrieves one article you already
+            # found. That distinction is what makes it safe for the
+            # fact-checker, whose whole job is re-reading cited sources.
+            lookup(StructuredTool.from_function(
                 coroutine=fetch_article,
                 name="fetch_article",
                 description=(
@@ -150,7 +161,7 @@ def make_news_toolset(feed: NewsFeed):
                     "properties": {"url": {"type": "string"}},
                     "required": ["url"],
                 },
-            ),
+            )),
         ]
         return tools
 

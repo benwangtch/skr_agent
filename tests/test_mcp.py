@@ -163,7 +163,7 @@ class TestAgainstARealServer:
         mesh = build_mesh(
             fixtures=root / "fixtures", project_root=root, extra_toolsets=[toolset]
         )
-        tools, subagents = mesh.report_agent.build_tools(context())
+        tools, subagents = mesh.agent.build_tools(context())
 
         assert "get_supplier_risk_score" in {t.name for t in tools}
         assert "get_supplier_risk_score" not in {t.name for t in subagents[0]["tools"]}
@@ -177,5 +177,5 @@ class TestAgainstARealServer:
         mesh = build_mesh(
             fixtures=root / "fixtures", project_root=root, extra_toolsets=[toolset]
         )
-        names = {t.name for t in mesh.report_agent.build_tools(context())[0]}
+        names = {t.name for t in mesh.agent.build_tools(context())[0]}
         assert {"list_bom_companies", "search_news", "wiki_search"} <= names

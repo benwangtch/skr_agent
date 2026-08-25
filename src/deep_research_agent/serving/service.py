@@ -39,7 +39,7 @@ def default_jobs(mesh, *, cron: str = "0 8 * * 1") -> list[ScheduledJob]:
         ScheduledJob(
             name="weekly-bom-sweep",
             cron=cron,
-            agent=mesh.report_agent,
+            agent=mesh.agent,
             task=(
                 "Run the weekly supply-chain incident sweep over the full bill "
                 "of materials and publish the report to the wiki."
@@ -74,12 +74,12 @@ async def run(
 
     base_url = f"http://{host}:{port}/"
     # a2a-sdk 1.x returns a ready FastAPI app; there is no .build() step.
-    app = build_a2a_app(mesh.report_agent, url=base_url, registry=mesh.registry)
+    app = build_a2a_app(mesh.agent, url=base_url, registry=mesh.registry)
     server = uvicorn.Server(uvicorn.Config(app, host=host, port=port, log_level="info"))
 
     scheduler = Scheduler(default_jobs(mesh, cron=cron))
 
-    log.info("serving %s at %s (A2A) + scheduler poll=%ss", mesh.report_agent.name, base_url, scheduler_poll_interval)
+    log.info("serving %s at %s (A2A) + scheduler poll=%ss", mesh.agent.name, base_url, scheduler_poll_interval)
     await asyncio.gather(
         server.serve(),
         scheduler.run_forever(poll_interval=scheduler_poll_interval),

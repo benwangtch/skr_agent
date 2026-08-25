@@ -104,7 +104,8 @@ async def check_mcp(verbose: bool) -> list[str]:
 
 
 def check_skills() -> list[str]:
-    from deep_research_agent.report.agent import DEFAULT_SKILLS, _env_skills
+    from deep_research_agent.core.agent import _env_skills
+    from deep_research_agent.domains import supply_chain
     from deep_research_agent.runtime import discover_skills, load_skill, skill_roots
 
     problems: list[str] = []
@@ -112,7 +113,11 @@ def check_skills() -> list[str]:
     print(f"{INFO} search path: {', '.join(str(r) for r in skill_roots(ROOT))}")
 
     available = discover_skills(ROOT)
-    loaded = list(DEFAULT_SKILLS) + _env_skills(list(DEFAULT_SKILLS))
+    # Checked against the scheduled deployment, which is the one whose skills
+    # have to resolve unattended. A face-to-user run with no domain loads only
+    # what SKILLS_ENABLED names.
+    domain_skills = list(supply_chain.from_fixtures(ROOT / "fixtures").skills)
+    loaded = domain_skills + _env_skills(domain_skills)
 
     for name in loaded:
         try:
@@ -125,7 +130,7 @@ def check_skills() -> list[str]:
 
     for name in sorted(set(available) - set(loaded)):
         print(f"{WARN} {name}: present but NOT loaded "
-              f"(add to DEFAULT_SKILLS or SKILLS_ENABLED)")
+              f"(add it to a domain's `skills`, or to SKILLS_ENABLED)")
     return problems
 
 

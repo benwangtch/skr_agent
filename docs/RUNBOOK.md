@@ -11,19 +11,26 @@
 ```
 src/deep_research_agent/
   protocol.py, mesh.py, runtime.py     契約層 + agent-as-tool + deepagents 執行殼
+  capabilities.py                      tool 能力宣告（lookup / search / mutating）
   principals.py                        service_principal() vs user_principal()
   assembly.py                          build_mesh() —— 組裝整個系統的唯一入口
   mcp.py                               外部 MCP server 當資料來源（預設關閉）
-  config/                              env-driven 設定（llm.py / mcp.py 有接上；db.py / minio.py 是佔位）
-  wiki/                                四個資料來源之一，唯一有授權模型的那個
-  report/                              agent 本體 + BOM/news 資料來源
+  observability.py                     Langfuse trace（預設關閉）
+  core/                                agent 本體，不含任何主題知識
+  domains/supply_chain/                供應鏈主題包：BOM/news 來源、investigator、rubric
+  config/                              env-driven 設定（llm/mcp/langfuse 有接上；db/minio 是佔位）
+  wiki/                                core 一定掛的來源，唯一有授權模型的那個
   serving/                             A2A server（streaming）+ cron-like scheduler
 fixtures/                              4 家公司、5 頁 wiki（namespace: supply / platform / shared）、4 份原始週報
 examples/
-  run_report.py                        單次執行 agent（掃描或單一提問）
+  run_report.py                        排程形態：掛供應鏈 domain，跑一次掃描
+  ask.py                               face-to-user 形態：domain=None，問任何事
   run_service.py                       同時跑 A2A server + 排程
-tests/                                 210 個測試，7 個檔案，全部不需要金鑰
+  check_setup.py                       花 token 前先驗設定
+tests/                                 235 個測試，9 個檔案，全部不需要金鑰
 ```
+
+**兩種部署形態共用同一個 agent**，差別只有 `build_mesh(domain=...)`：排程跑的是已知任務（掛 domain），使用者問的是未知任務（`domain=None`）。詳見 DESIGN §3.4。
 
 ---
 
@@ -76,7 +83,7 @@ MCP 連不上時預設只印一行結論，加 `-v` 才會印底層的例外（h
 ## 2. 跑單元測試（不花錢、不用金鑰）
 
 ```bash
-uv run pytest              # 210 個測試，約 3 秒
+uv run pytest              # 235 個測試，約 11 秒
 uv run pytest -q tests/test_wiki_authz.py     # 只跑某個檔案
 uv run pytest -k aggregation                  # 只跑名字符合的測試
 ```
@@ -85,7 +92,8 @@ uv run pytest -k aggregation                  # 只跑名字符合的測試
 |---|---|
 | `test_wiki_authz.py`（32） | namespace 授權、clearance-gated namespace、aggregation leak 檢查 |
 | `test_mesh.py`（15） | agent-as-tool 的 principal 綁定、citation 傳遞、拒絕處理 |
-| `test_wiring.py`（54） | 每個 agent 的 tool 清單、沒有 subagent 能發布、fact-checker 沒有 search tool、scratchpad/停止條件/矛盾處理有進 prompt、import 風格 |
+| `test_wiring.py`（55） | 每個 agent 的 tool 清單、沒有 subagent 能發布（兩種部署形態都驗）、fact-checker 沒有 search tool、scratchpad/停止條件/矛盾處理有進 prompt、import 風格 |
+| `test_general_agent.py`（24） | 沒有 domain 也是完整形態、domain 只能加不能放寬規則、tool 能力宣告與 fail-closed 預設 |
 | `test_config.py`（22） | LLM config 的 provider 預設值、env var 覆蓋、chat model 建構 |
 | `test_scheduler.py`（19） | cron 排程時序、job 失敗互不影響、hook 觸發 |
 | `test_observability.py`（19） | Langfuse 設定解析、連不上時降級、trace metadata、MCP tool 標記 |
@@ -152,7 +160,7 @@ uv run python examples/run_report.py --division supply --tier critical --out exa
 uv run python examples/run_report.py --reader-only
 ```
 
-預期：agent 會嘗試發布，被 `wiki_write_page` 拒絕（因為這個 principal 沒有 `wiki.writer` role），然後**agent 會照 prompt 指示回報「內容做完了但沒發布，因為權限不足」，而不是想辦法繞過去**。這是 `report/agent.py` 系統提示裡明講的行為，值得在這步實際確認 agent 真的照做，而不是只看程式碼寫了什麼。
+預期：agent 會嘗試發布，被 `wiki_write_page` 拒絕（因為這個 principal 沒有 `wiki.writer` role），然後**agent 會照 prompt 指示回報「內容做完了但沒發布，因為權限不足」，而不是想辦法繞過去**。這是 `core/prompt.py` 系統提示裡明講的行為，值得在這步實際確認 agent 真的照做，而不是只看程式碼寫了什麼。
 
 ### 3.4 排程帳號：驗證跨部門彙整 + exec namespace
 
@@ -174,13 +182,51 @@ uv run python examples/run_report.py --ask "What is our exposure on the ASC-4400
 uv run python examples/run_report.py --ask "..." -v 2>&1 | grep -i "tool"
 ```
 
-如果它對這種純內部查詢也去跑完整 sweep，代表 `report/agent.py` 的 system prompt 需要調整——這是驗證「deep research agent 會不會把力氣花在不需要的地方」的地方。對照組：
+如果它對這種純內部查詢也去跑完整 sweep，代表 `core/prompt.py` 的 system prompt 需要調整——這是驗證「deep research agent 會不會把力氣花在不需要的地方」的地方。對照組：
 
 ```bash
 uv run python examples/run_report.py --ask "What happened with our suppliers this week?"
 ```
 
 這句需要外部研究，應該會看到 `search_news` / `fetch_article` 出現。
+
+### 3.5b 沒有 domain 的通用 agent：使用者問任何事
+
+前面每一步都掛著供應鏈 domain（因為那是排程要跑的已知任務）。這一步驗的是另一種部署形態：**使用者打字問一個沒人預先設計過的問題**。
+
+```bash
+uv run python examples/ask.py "What do we know about the auth rewrite?"
+uv run python examples/ask.py --read-only "Why did our Q3 lead times slip?"
+```
+
+差別只在 `build_mesh(domain=None)`。預期：
+
+- **tool 只剩 wiki 三個**（加上你設定的 MCP）。沒有 `list_bom_companies`、沒有 `search_news`——那些是 domain 帶進來的。
+- **研究行為完全沒少**：一樣會 plan、一樣會用 `task` 委派給 `general-purpose`、一樣會在發布前叫 `fact-checker`。§4 那四個設計在 core，不在 domain。
+- **輸出是逐步串流的**（`ask.py` 用 `stream()` 而不是 `run()`）。一個開放式問題可能跑好幾分鐘，而打字的人正坐在那裡等。
+- `--read-only` 會把寫入 tool 整個拿掉，連 prompt 裡的 `# Publishing` 那段都不會出現，這時 agent 的最終訊息本身就是交付物（不是「報告在 wiki 上」的短摘要）。
+
+不花錢的等價檢查：
+
+```bash
+uv run python -c "
+from deep_research_agent import build_mesh
+from deep_research_agent.runtime import ToolContext
+from deep_research_agent.protocol import AgentRequest
+from deep_research_agent.principals import user_principal
+p = user_principal('a','supply',roles={'wiki.reader','wiki.writer'})
+ctx = ToolContext(principal=p, request=AgentRequest(principal=p, task='t'))
+for label, dom in (('scheduled', ...), ('face-to-user', None)):
+    kw = {} if dom is ... else {'domain': dom}
+    m = build_mesh(fixtures='fixtures', project_root='.', **kw)
+    tools, subs = m.agent.build_tools(ctx)
+    print(label, sorted(t.name for t in tools))
+    for s in subs:
+        print('   ', s['name'], '->', sorted(t.name for t in s['tools']))
+"
+```
+
+兩種形態都應該看到**沒有任何 subagent 拿到 `wiki_write_page`**。這不是靠白名單維護的，是靠 tool 上的能力宣告（DESIGN §3.5）。
 
 ### 3.6 A2A server + 排程：兩個一起跑
 
@@ -313,7 +359,7 @@ SKILLS_ENABLED=house-style            # 也就是 /opt/shared-skills/house-style
 臨時試一份 skill，不想設環境變數：
 
 ```python
-build_deep_research_agent(..., skills=["incident-report", "/abs/path/to/house-style"])
+ResearchDomain(..., skills=("incident-report", "/abs/path/to/house-style"))
 ```
 
 名字裡有 `/` 或結尾是 `.md` 就當成路徑直接讀，不走搜尋路徑。
@@ -327,7 +373,7 @@ mkdir -p skills/your-skill
 $EDITOR skills/your-skill/SKILL.md
 ```
 
-然後把名字加進 `src/deep_research_agent/report/agent.py` 的 `DEFAULT_SKILLS`。
+然後把名字加進該 domain 的 `skills`（供應鏈的在 `src/deep_research_agent/domains/supply_chain/agent.py`）。
 
 ### SKILL.md 長什麼樣
 
@@ -350,8 +396,8 @@ description: 一句話講這個 skill 管什麼
 uv run python -c "
 from deep_research_agent import build_mesh
 m = build_mesh(fixtures='fixtures', project_root='.')
-print('loaded:', m.report_agent.skills)
-p = m.report_agent._full_system_prompt()
+print('loaded:', m.agent.skills)
+p = m.agent._full_system_prompt()
 print('your text in prompt:', '你 skill 裡的某一句' in p)
 print('prompt chars:', len(p))
 "
@@ -377,7 +423,7 @@ print('prompt chars:', len(p))
 - A2A server 跟排程可以在同一個 process 穩定跑，外部呼叫走得通（3.6）
 - （若有設定）MCP tool 載得到、模型會用、而且留下 `mcp://` citation（3.7）
 
-這六步涵蓋了 `docs/design/DESIGN.md` §9 列出的「已知限制」之外的核心行為。**沒有自動化的 e2e 測試**（§2 的 210 個測試都用 stub，不叫真的模型）——這是刻意的，因為每次 CI 跑都花 token、還會因為模型輸出的隨機性讓測試不穩定。真要把 §3 這幾步自動化，做法是寫一支跑在 CI 之外（例如手動觸發或排程跑一次）的 smoke test script，判準改成寬鬆的（例如「有沒有 citations」而不是「內容逐字符合」）——這份文件目前先提供人工跑過一遍的步驟，還沒做那支腳本。
+這六步涵蓋了 `docs/design/DESIGN.md` §9 列出的「已知限制」之外的核心行為。**沒有自動化的 e2e 測試**（§2 的 235 個測試都用 stub，不叫真的模型）——這是刻意的，因為每次 CI 跑都花 token、還會因為模型輸出的隨機性讓測試不穩定。真要把 §3 這幾步自動化，做法是寫一支跑在 CI 之外（例如手動觸發或排程跑一次）的 smoke test script，判準改成寬鬆的（例如「有沒有 citations」而不是「內容逐字符合」）——這份文件目前先提供人工跑過一遍的步驟，還沒做那支腳本。
 
 ## 5. 常見卡住的地方
 
@@ -392,4 +438,4 @@ print('prompt chars:', len(p))
 | 想確認 wiki 真的被寫入，但 `list_namespaces()` 看不出新舊 | 用 `-v` 開 log，找 `wiki.write` 那行 | §3.2 |
 | MCP tool 沒出現在 agent 身上 | 分辨「沒設定」跟「連不上」——看 log 有沒有 `mcp.load_failed` | §3.7 |
 | MCP tool 載到了但模型不呼叫它 | tool description 太模糊；那是模型唯一的判斷依據 | §3.7 |
-| 改了 SKILL.md 但行為沒變 | 確認 skill 名字有加進 `DEFAULT_SKILLS`；沒加就不會被載 | §3.8 |
+| 改了 SKILL.md 但行為沒變 | 確認 skill 名字有加進 domain 的 `skills` 或 `SKILLS_ENABLED`；沒加就不會被載 | §3.8 |

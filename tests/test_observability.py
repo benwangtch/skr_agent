@@ -181,4 +181,4 @@ def mesh_tools():
     mesh = build_mesh(fixtures=root / "fixtures", project_root=root)
     ctx = ToolContext(principal=principal,
                       request=AgentRequest(principal=principal, task="t"))
-    return mesh.report_agent.build_tools(ctx)[0]
+    return mesh.agent.build_tools(ctx)[0]

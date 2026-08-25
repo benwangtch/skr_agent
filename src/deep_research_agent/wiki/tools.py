@@ -1,9 +1,13 @@
 """The wiki as a set of authorized tools.
 
 The wiki is *one* of the agent's data sources — the internal-knowledge one,
-alongside the BOM and external news in ``report/``. It gets its own module
-because it is the only source with an authorization model worth enforcing, not
-because it is the centre of the system.
+alongside whatever a domain mounts and whatever MCP servers are configured. It
+gets its own module because it is the only source with an authorization model
+worth enforcing, not because it is the centre of the system.
+
+It is mounted by the core rather than by a domain, because "what do we already
+know internally" and "where does finished work land" are questions every
+research task has, including one a user types that matches no domain at all.
 
 That authorization is enforced here, in the tool layer, against a principal
 the caller cannot forge. Putting an LLM in front of these tools would add a
@@ -19,6 +23,7 @@ from typing import Any
 
 from langchain_core.tools import BaseTool, StructuredTool
 
+from deep_research_agent.capabilities import lookup, mutating, search
 from deep_research_agent.protocol import Citation, Denied
 from deep_research_agent.runtime import ToolBundle, ToolContext
 from deep_research_agent.wiki.authz import WikiAuthorizer
@@ -107,7 +112,7 @@ def build_wiki_tools(
         return "\n".join(body)
 
     tools: list[BaseTool] = [
-        StructuredTool.from_function(
+        search(StructuredTool.from_function(
             coroutine=wiki_search,
             name="wiki_search",
             description=(
@@ -128,8 +133,11 @@ def build_wiki_tools(
                 },
                 "required": ["query"],
             },
-        ),
-        StructuredTool.from_function(
+        )),
+        # A lookup: it reads one page by ref. This is the tool the
+        # fact-checker leans on, which is why the distinction is declared
+        # rather than inferred from the name.
+        lookup(StructuredTool.from_function(
             coroutine=wiki_read_page,
             name="wiki_read_page",
             description=(
@@ -143,7 +151,7 @@ def build_wiki_tools(
                 "properties": {"ref": {"type": "string"}},
                 "required": ["ref"],
             },
-        ),
+        )),
     ]
 
     if writable:
@@ -193,7 +201,9 @@ def build_wiki_tools(
             return f"Wrote {page.ref} with {len(page.source_refs)} source reference(s)."
 
         tools.append(
-            StructuredTool.from_function(
+            # The one mutating tool in the repo. The declaration is what keeps
+            # it off every subagent, whatever domain or MCP server is mounted.
+            mutating(StructuredTool.from_function(
                 coroutine=wiki_write_page,
                 name="wiki_write_page",
                 description=(
@@ -218,7 +228,7 @@ def build_wiki_tools(
                     },
                     "required": ["namespace", "slug", "title", "body", "source_refs"],
                 },
-            )
+            ))
         )
 
     return tools

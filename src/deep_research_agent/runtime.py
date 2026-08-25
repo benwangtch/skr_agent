@@ -168,7 +168,7 @@ def discover_skills(root: str | Path) -> dict[str, Path]:
     """Every skill that exists on disk, by name, first root wins.
 
     This is how the agent knows what is *available* as opposed to what it was
-    told to load. ``build_deep_research_agent`` uses it to point out a skill
+    told to load. ``build_research_agent`` uses it to point out a skill
     sitting in the repo that nothing is loading — the failure mode of a
     folder-based convention is a file that looks installed and silently is
     not.

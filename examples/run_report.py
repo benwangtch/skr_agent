@@ -69,7 +69,7 @@ async def main() -> None:
             f"demo.user@{args.division}", args.division, roles=roles, token="demo-token"
         )
 
-    agent = mesh.report_agent
+    agent = mesh.agent
 
     if args.ask:
         request = AgentRequest(principal=principal, task=args.ask, budget=Budget(max_turns=20))

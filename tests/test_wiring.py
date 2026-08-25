@@ -56,7 +56,7 @@ class TestDeepResearchAgentWiring:
         assert mesh_with_wiki_agent.coordinator is not None
 
     def test_wiki_is_reached_only_through_its_own_authorized_tools(self, mesh):
-        names, _, _ = surface(mesh.report_agent)
+        names, _, _ = surface(mesh.agent)
         assert {n for n in names if n.startswith("wiki_")} == {
             "wiki_read_page",
             "wiki_search",
@@ -65,7 +65,7 @@ class TestDeepResearchAgentWiring:
 
     def test_every_data_source_is_mounted(self, mesh):
         """BOM, news and wiki are peers — the agent is not a wiki client."""
-        names, _, _ = surface(mesh.report_agent)
+        names, _, _ = surface(mesh.agent)
         assert {"list_bom_companies", "get_bom_company"} <= names
         assert {"search_news", "fetch_article"} <= names
         assert {"wiki_search", "wiki_read_page"} <= names
@@ -73,7 +73,7 @@ class TestDeepResearchAgentWiring:
     def test_report_rubric_is_inlined_into_the_system_prompt(self, mesh):
         """Not left to progressive disclosure: a mandatory rubric the model
         might forget to read is a rubric that does not exist. See runtime.py."""
-        prompt = mesh.report_agent._full_system_prompt()
+        prompt = mesh.agent._full_system_prompt()
         assert "Severity rubric" in prompt
         assert "source_refs" in prompt
 
@@ -87,18 +87,18 @@ class TestDeepResearchAgentWiring:
         assert body.startswith("#")
 
     def test_subagent_tools_are_a_subset_of_the_parent_surface(self, mesh):
-        names, subagents, _ = surface(mesh.report_agent)
+        names, subagents, _ = surface(mesh.agent)
         for sub in subagents:
             assert {t.name for t in sub["tools"]} <= names, sub["name"]
 
     def test_no_subagent_can_publish(self, mesh):
         """Only the top-level agent publishes."""
-        _, subagents, _ = surface(mesh.report_agent)
+        _, subagents, _ = surface(mesh.agent)
         for sub in subagents:
             assert "wiki_write_page" not in {t.name for t in sub["tools"]}, sub["name"]
 
     def test_the_investigator_can_still_research(self, mesh):
-        _, subagents, _ = surface(mesh.report_agent)
+        _, subagents, _ = surface(mesh.agent)
         investigator = by_name(subagents)["company-investigator"]
         assert {"wiki_search", "search_news"} <= {t.name for t in investigator["tools"]}
 
@@ -108,14 +108,14 @@ class TestDeepResearchStructure:
     verification pass, notes on a scratchpad, and an explicit stopping check."""
 
     def test_a_fact_checker_subagent_exists(self, mesh):
-        _, subagents, _ = surface(mesh.report_agent)
+        _, subagents, _ = surface(mesh.agent)
         assert "fact-checker" in by_name(subagents)
 
     def test_the_fact_checker_cannot_search(self, mesh):
         """A checker that can go find new material starts researching instead
         of checking, and 'confirms' claims from sources the report never
         cited."""
-        _, subagents, _ = surface(mesh.report_agent)
+        _, subagents, _ = surface(mesh.agent)
         checker_tools = {t.name for t in by_name(subagents)["fact-checker"]["tools"]}
         assert "search_news" not in checker_tools
         assert "wiki_search" not in checker_tools
@@ -123,34 +123,34 @@ class TestDeepResearchStructure:
         assert {"fetch_article", "wiki_read_page"} <= checker_tools
 
     def test_the_lead_is_told_to_verify_before_publishing(self, mesh):
-        prompt = mesh.report_agent._full_system_prompt()
+        prompt = mesh.agent._full_system_prompt()
         assert "fact-checker" in prompt
         assert "REVISE" in prompt
 
     def test_the_lead_is_told_to_read_the_findings_files(self, mesh):
         """The scratchpad only helps if the lead synthesises from the files
         rather than from the subagents' short replies."""
-        prompt = mesh.report_agent._full_system_prompt()
+        prompt = mesh.agent._full_system_prompt()
         assert "read_file" in prompt
         assert "/findings/" in prompt
 
     def test_the_investigator_is_told_to_write_its_findings_file(self):
-        from deep_research_agent.report.agent import INVESTIGATOR_PROMPT
+        from deep_research_agent.domains.supply_chain import INVESTIGATOR_PROMPT
 
         assert "/findings/" in INVESTIGATOR_PROMPT
 
     def test_the_lead_has_an_explicit_stopping_check(self, mesh):
-        prompt = mesh.report_agent._full_system_prompt()
+        prompt = mesh.agent._full_system_prompt()
         assert "single source" in prompt or "one source" in prompt
 
     def test_contradictions_must_be_surfaced_not_resolved_silently(self, mesh):
-        prompt = mesh.report_agent._full_system_prompt()
+        prompt = mesh.agent._full_system_prompt()
         assert "disagree" in prompt
 
 
 class TestBudgetPropagation:
     async def test_expired_deadline_fails_before_spending_anything(self, mesh):
-        response = await mesh.report_agent.run(
+        response = await mesh.agent.run(
             AgentRequest(
                 principal=ALICE,
                 task="t",
@@ -240,8 +240,10 @@ class TestAddingYourOwnSkill:
     -- inlined in full, not merely advertised."""
 
     def test_a_second_skill_is_inlined_too(self, tmp_path):
-        from deep_research_agent.report import build_deep_research_agent
-        from deep_research_agent.report.sources import FixtureBom, FixtureNewsFeed
+        import dataclasses
+
+        from deep_research_agent.core.agent import build_research_agent
+        from deep_research_agent.domains import supply_chain
         from deep_research_agent.wiki import InMemoryWikiBackend, WikiAuthorizer
 
         skill_dir = tmp_path / "skills" / "house-style"
@@ -256,13 +258,15 @@ class TestAddingYourOwnSkill:
         builtin.mkdir(parents=True)
         (builtin / "SKILL.md").write_text("# Rubric\n\nSeverity rubric here.\n", encoding="utf-8")
 
-        agent = build_deep_research_agent(
-            bom=FixtureBom.from_fixtures(ROOT / "fixtures"),
-            news=FixtureNewsFeed.from_fixtures(ROOT / "fixtures"),
+        domain = dataclasses.replace(
+            supply_chain.from_fixtures(ROOT / "fixtures"),
+            skills=("incident-report", "house-style"),
+        )
+        agent = build_research_agent(
             wiki_backend=InMemoryWikiBackend.from_fixtures(ROOT / "fixtures"),
             wiki_authz=WikiAuthorizer(),
             project_root=tmp_path,
-            skills=["incident-report", "house-style"],
+            domain=domain,
         )
         prompt = agent._full_system_prompt()
         assert "Always lead with the risk." in prompt
@@ -418,8 +422,8 @@ class TestLoadingASkillYouMaintain:
         reset_settings_cache()
         try:
             mesh = build_mesh(fixtures=ROOT / "fixtures", project_root=ROOT)
-            assert mesh.report_agent.skills == ["incident-report", "house-style"]
-            prompt = mesh.report_agent._full_system_prompt()
+            assert mesh.agent.skills == ["incident-report", "house-style"]
+            prompt = mesh.agent._full_system_prompt()
             assert "Lead with the exposure." in prompt
             assert "Severity rubric" in prompt
         finally:
@@ -432,7 +436,7 @@ class TestLoadingASkillYouMaintain:
         reset_settings_cache()
         try:
             mesh = build_mesh(fixtures=ROOT / "fixtures", project_root=ROOT)
-            assert mesh.report_agent.skills == ["incident-report"]
+            assert mesh.agent.skills == ["incident-report"]
         finally:
             reset_settings_cache()
 
@@ -496,7 +500,7 @@ class TestTheRepoSkillsFolder:
         installed and silently is not."""
         import logging
 
-        from deep_research_agent.report.agent import _warn_about_unloaded_skills
+        from deep_research_agent.core.agent import _warn_about_unloaded_skills
 
         d = tmp_path / "skills" / "house-style"
         d.mkdir(parents=True)
@@ -509,7 +513,7 @@ class TestTheRepoSkillsFolder:
     def test_no_warning_when_everything_present_is_loaded(self, tmp_path, caplog):
         import logging
 
-        from deep_research_agent.report.agent import _warn_about_unloaded_skills
+        from deep_research_agent.core.agent import _warn_about_unloaded_skills
 
         d = tmp_path / "skills" / "house-style"
         d.mkdir(parents=True)
@@ -572,28 +576,37 @@ class TestNoSubagentCanPublish:
     """
 
     def test_the_framework_registers_exactly_the_subagents_we_declare(self, mesh):
-        names = {s["name"] for s in subagents_registered_with_the_framework(mesh.report_agent)}
+        names = {s["name"] for s in subagents_registered_with_the_framework(mesh.agent)}
         assert names == {"general-purpose", "company-investigator", "fact-checker"}
 
     def test_no_registered_subagent_has_the_write_tool(self, mesh):
-        for spec in subagents_registered_with_the_framework(mesh.report_agent):
+        for spec in subagents_registered_with_the_framework(mesh.agent):
             tools = {t.name for t in (spec.get("tools") or [])}
             assert "wiki_write_page" not in tools, spec["name"]
 
     def test_general_purpose_can_still_research(self, mesh):
         """Restricting it must not make it useless -- delegating an open
         sub-question to a fresh context window is worth keeping."""
-        specs = {s["name"]: s for s in subagents_registered_with_the_framework(mesh.report_agent)}
+        specs = {s["name"]: s for s in subagents_registered_with_the_framework(mesh.agent)}
         tools = {t.name for t in specs["general-purpose"]["tools"]}
         assert {"search_news", "wiki_search", "fetch_article"} <= tools
 
     def test_declaring_general_purpose_overrides_the_automatic_one(self, mesh):
         """If our spec stopped taking effect, the auto-added one would come
         back with full tools and this would fail."""
-        specs = {s["name"]: s for s in subagents_registered_with_the_framework(mesh.report_agent)}
+        specs = {s["name"]: s for s in subagents_registered_with_the_framework(mesh.agent)}
         ours = {t.name for t in specs["general-purpose"]["tools"]}
-        every_tool = {t.name for t in mesh.report_agent.build_tools(context_for(ALICE))[0]}
+        every_tool = {t.name for t in mesh.agent.build_tools(context_for(ALICE))[0]}
         assert ours < every_tool, "general-purpose inherited everything -- ours was ignored"
+
+    def test_the_guarantee_holds_with_no_domain_loaded(self):
+        """The face-to-user deployment loads no domain, so it is the one most
+        likely to be assembled somewhere this list was never reviewed."""
+        general = build_mesh(fixtures=ROOT / "fixtures", project_root=ROOT, domain=None)
+        specs = subagents_registered_with_the_framework(general.agent)
+        assert {s["name"] for s in specs} == {"general-purpose", "fact-checker"}
+        for spec in specs:
+            assert "wiki_write_page" not in {t.name for t in (spec.get("tools") or [])}
 
 
 def context_for(principal):
