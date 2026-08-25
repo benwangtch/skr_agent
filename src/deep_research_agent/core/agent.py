@@ -172,7 +172,13 @@ def build_research_agent(
             check_references=check_references,
         ),
         toolsets=[
-            make_wiki_toolset(wiki_backend, wiki_authz, writable=publishable),
+            make_wiki_toolset(
+                wiki_backend, wiki_authz,
+                writable=publishable,
+                # Only when the checker is actually mounted -- a gate nothing
+                # can open is worse than no gate.
+                require_reference_check=reference_format is not None,
+            ),
             *reference_toolsets(reference_format),
             *(domain.toolsets if domain else ()),
             *extra_toolsets,

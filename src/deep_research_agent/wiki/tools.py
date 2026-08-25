@@ -24,7 +24,7 @@ from typing import Any
 from langchain_core.tools import BaseTool, StructuredTool
 
 from deep_research_agent.capabilities import lookup, mutating, search
-from deep_research_agent.protocol import Citation, Denied
+from deep_research_agent.protocol import Citation, Denied, RetrievedDocument
 from deep_research_agent.runtime import ToolBundle, ToolContext
 from deep_research_agent.wiki.authz import WikiAuthorizer
 from deep_research_agent.wiki.backend import WikiBackend, WikiPage
@@ -37,7 +37,12 @@ WIKI_TOOL_NAMES = ("wiki_search", "wiki_read_page", "wiki_write_page")
 
 
 def build_wiki_tools(
-    backend: WikiBackend, authz: WikiAuthorizer, ctx: ToolContext, *, writable: bool = True
+    backend: WikiBackend,
+    authz: WikiAuthorizer,
+    ctx: ToolContext,
+    *,
+    writable: bool = True,
+    require_reference_check: bool = False,
 ) -> list[BaseTool]:
     """Build the tools for one request's principal.
 
@@ -46,6 +51,11 @@ def build_wiki_tools(
 
     ``writable=False`` drops the write tool entirely — used for subagents and
     read-only callers, so the capability is absent rather than merely refused.
+
+    ``require_reference_check=True`` refuses a write whose exact body has not
+    passed ``check_references``. Off by default so a caller mounting the wiki
+    without that tool does not get an unpassable gate; ``core/agent.py`` turns
+    it on whenever it mounts both.
     """
     principal = ctx.principal
 
@@ -90,6 +100,22 @@ def build_wiki_tools(
             return f"Error: no page at {ref!r}."
 
         ctx.cite(Citation(kind="wiki_page", ref=page.ref, title=page.title))
+        # Kept whole, not just noted: anything checking or formatting a
+        # reference afterwards needs the document, not a record that it was
+        # seen. See ToolContext.documents.
+        ctx.record(
+            RetrievedDocument(
+                ref=page.ref,
+                kind="wiki_page",
+                title=page.title,
+                content=page.body,
+                metadata={
+                    "namespace": page.namespace,
+                    "updated": page.updated,
+                    "source_refs": list(page.source_refs),
+                },
+            )
+        )
         body = [f"# {page.title}\n({page.ref}, updated {page.updated})\n\n{page.body}"]
         for report_id in page.source_refs:
             report = backend.get_raw_report(report_id)
@@ -105,6 +131,19 @@ def build_wiki_tools(
                 )
             )
             if report:
+                ctx.record(
+                    RetrievedDocument(
+                        ref=report_id,
+                        kind="raw_report",
+                        title=f"{report.namespace} weekly, week of {report.week_of}",
+                        content=report.body,
+                        metadata={
+                            "namespace": report.namespace,
+                            "author": report.author,
+                            "week_of": report.week_of,
+                        },
+                    )
+                )
                 body.append(
                     f"\n## Source {report_id} ({report.author}, week of "
                     f"{report.week_of})\n{report.body}"
@@ -176,6 +215,22 @@ def build_wiki_tools(
                     "report id or external URL supporting this page."
                 )
 
+            # The reference gate. A prompt instruction to "check before
+            # publishing" is a request the model can skip; this is the same
+            # move the source_refs rule above already makes -- refuse the
+            # write and say what would make it succeed. The approval is a
+            # fingerprint of the exact text that passed, so editing the draft
+            # afterwards invalidates it rather than inheriting it.
+            if require_reference_check and not ctx.is_approved(body):
+                return (
+                    "Error: this exact content has not passed check_references. "
+                    "Run check_references on the body you intend to publish "
+                    "(passing the same source_refs), resolve anything it reports, "
+                    "then publish the version that passed. Editing the draft after "
+                    "the check means running it again -- the approval covers the "
+                    "text that was checked, not the draft in general."
+                )
+
             # The leak guard. A report distilled from several namespaces must
             # not land somewhere with a wider readership than its sources.
             source_namespaces = _namespaces_of(backend, source_refs)
@@ -234,11 +289,21 @@ def build_wiki_tools(
     return tools
 
 
-def make_wiki_toolset(backend: WikiBackend, authz: WikiAuthorizer, *, writable: bool = True):
+def make_wiki_toolset(
+    backend: WikiBackend,
+    authz: WikiAuthorizer,
+    *,
+    writable: bool = True,
+    require_reference_check: bool = False,
+):
     """The ``ToolsetFactory`` a ``DeepAgent`` takes."""
 
     def factory(ctx: ToolContext) -> ToolBundle:
-        return build_wiki_tools(backend, authz, ctx, writable=writable)
+        return build_wiki_tools(
+            backend, authz, ctx,
+            writable=writable,
+            require_reference_check=require_reference_check,
+        )
 
     return factory
 

@@ -35,10 +35,11 @@ undeclared tool is treated as mutating. `DESIGN.md` §3.5.
 
 References are checked by a **parser, not a model** (`DESIGN.md` §4.1c). The
 `fact-checker` asks *does the source say this*; `check_references` asks *is a
-reference attached, in the agreed shape, pointing at something we actually
-retrieved*. That last part is decidable here and nowhere else: the tool layer
-records what it read, so a citation written from memory is caught with
-certainty rather than judgement.
+reference attached, in the agreed shape*. And the check is not a prompt
+instruction the model can skip: passing it is what unlocks `wiki_write_page`,
+the same way missing `source_refs` already blocks a publish. Every document
+the run loads is kept in a per-request store, so a checker can say "the loaded
+copy of this source has no date, so it cannot be cited in the required form".
 
 [**`docs/design/DESIGN.md`**](docs/design/DESIGN.md) is the design doc — one
 current-state reference covering the execution framework, the four choices
@@ -67,8 +68,8 @@ src/deep_research_agent/
   core/            ★ the agent, minus any subject matter
     prompt.py        method, evidence rules, stopping check, verification (assembled)
     subagents.py     general-purpose + fact-checker + reference-checker; none can publish
-    references.py    ★ is every claim referenced, in our format, and real? (a parser)
-    reference_tools.py ★ binds that to what the run actually retrieved
+    references.py    ★ is every claim referenced, in our format? (a parser)
+    reference_tools.py ★ binds it to the run's document store + the publish gate
     domain.py        ResearchDomain / Specialist — what a subject pack may add
     agent.py         build_research_agent(domain=None)
   domains/         ★ subject packs; optional, additive, cannot loosen a rule
@@ -219,7 +220,7 @@ scheduler survive running together).
 ## Test
 
 ```bash
-uv run pytest              # 291 tests, no credentials required
+uv run pytest              # 301 tests, no credentials required
 ```
 
 Coverage: namespace authorization, clearance-gated namespaces, the

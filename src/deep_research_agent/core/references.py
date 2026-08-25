@@ -2,9 +2,8 @@
 
 This is a different question from the one ``fact-checker`` answers. That one
 asks *does the cited source actually say this*, which is a semantic judgement
-and needs a model. This asks *is a reference attached, in the agreed shape,
-pointing at something we genuinely retrieved* — which is parsing, and parsing
-should not be delegated to a model.
+and needs a model. This asks *is a reference attached, and is it in the shape
+we agreed* — which is parsing, and parsing should not be delegated to a model.
 
 The distinction matters because the failure modes are different. Asking a
 model to confirm that all twenty findings in a report carry sources is an
@@ -21,13 +20,12 @@ Four checks, in increasing order of what they are worth:
     Each reference parses as one of the forms this deployment uses — a URL, a
     ``namespace/slug`` page reference, a raw report id.
 
-``grounding``
-    **Every cited reference was actually retrieved during this run.** This is
-    the one that could not be done anywhere else: the tool layer already
-    records a ``Citation`` for everything it reads, so a reference that never
-    appears in that record was not read — it was invented. The report rubric
-    has always said "never cite an article you have not fetched in full", and
-    until now that was a sentence in a prompt. It is now decidable.
+``resolvable``
+    Each reference points at something in the run's retrieval store, and that
+    document carries what the format needs — a title, a date. This is not a
+    grounding check and does not try to be one: an unresolvable reference is
+    reported as *"this cannot be formatted, because nothing loaded describes
+    it"*, which is a formatting fact, not an accusation.
 
 ``declaration``
     The ``source_refs`` passed to the publish call and the references in the
@@ -43,7 +41,7 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass, field
-from typing import Iterable, Literal, Sequence
+from typing import Any, Literal, Mapping, Sequence
 
 __all__ = [
     "ReferenceFormat",
@@ -99,6 +97,15 @@ class ReferenceFormat:
     })
     """The reference shapes this deployment accepts, tried in order."""
 
+    required_document_fields: tuple[str, ...] = ()
+    """Fields the loaded document must carry for a reference to be renderable
+    in this format — e.g. ``("title", "published")`` for a house style that
+    prints an outlet and a date.
+
+    Empty by default: the shipped rubric asks for a bare reference, and
+    demanding a date from a source that has none would report a defect the
+    agent cannot fix. Set it when the format genuinely needs the field."""
+
     def compiled_sections(self) -> re.Pattern[str]:
         return re.compile(self.section_pattern, re.M)
 
@@ -148,7 +155,7 @@ class ReferenceReport:
             f"{sum(1 for v in self.violations if v.severity == 'warning')} warning(s)"
         )
         if not self.violations:
-            return head + "\nEvery claim-bearing section is sourced, every reference is grounded."
+            return head + "\nEvery claim-bearing section is sourced and every reference is well formed."
         return head + "\n" + "\n".join(v.render() for v in self.violations)
 
 
@@ -192,23 +199,18 @@ def _sections(text: str, fmt: ReferenceFormat) -> list[tuple[str, int, str]]:
 def check_references(
     content: str,
     *,
-    retrieved: Iterable[str] | None = None,
+    corpus: Mapping[str, Mapping[str, Any]] | None = None,
     declared: Sequence[str] | None = None,
     fmt: ReferenceFormat = DEFAULT_FORMAT,
 ) -> ReferenceReport:
     """Check one draft.
 
-    ``retrieved`` is what this run actually read — the ``ref`` of every
-    ``Citation`` the tool layer recorded. Anything cited but absent from it
-    was not retrieved, which is the strongest signal available that a
-    reference was invented rather than found.
-
-    ``None`` and ``[]`` mean different things here, deliberately. ``None`` is
-    "no retrieval record available, do not check grounding" — for a caller
-    checking a document this process did not produce. ``[]`` is "this run
-    retrieved nothing", under which every reference in the draft is
-    ungrounded, because it must have come from somewhere other than a source.
-    The tool always passes the real list, empty or not.
+    ``corpus`` maps a reference to what is known about the document behind it
+    — ``title``, ``published``, whatever the source supplied. It comes from
+    the run's retrieval store (``ToolContext.documents``) and is what lets the
+    check say "this cannot be cited in the required form because the loaded
+    copy has no date". ``None`` skips those checks, which is right for a
+    caller checking a document this process did not produce.
 
     ``declared`` is the ``source_refs`` list the caller intends to pass to the
     publish call, when there is one. ``None`` means "not publishing yet", and
@@ -216,7 +218,6 @@ def check_references(
     """
     violations: list[Violation] = []
     body_refs = extract_references(content, fmt)
-    retrieved_set = None if retrieved is None else set(retrieved)
 
     for title, line_no, body in _sections(content, fmt):
         if fmt.is_exempt(title):
@@ -244,19 +245,35 @@ def check_references(
                 message=f"{fmt.sources_marker} is present but names no reference",
             ))
 
-    # Grounding. Checked against every reference in the body, not only those on
-    # a sources line: a URL dropped into prose is still a citation to a reader.
-    if retrieved_set is not None:
+    # Resolvability. Not a grounding check: the question is whether the
+    # reference can be rendered in the required form, which needs the document
+    # the store holds. A reference nothing loaded describes is a warning --
+    # the corpus is not guaranteed complete, and treating an incomplete corpus
+    # as evidence of a bad citation would produce exactly the false positives
+    # that get a checker ignored.
+    if corpus is not None:
         for ref in body_refs:
-            if ref not in retrieved_set:
+            document = corpus.get(ref)
+            if document is None:
                 violations.append(Violation(
-                    kind="ungrounded_reference", severity="error",
+                    kind="unresolvable_reference", severity="warning",
                     line=_line_of(content, ref),
                     message=(
-                        f"{ref!r} was never retrieved during this run. Either read it "
-                        f"before citing it, or drop the claim -- do not cite from memory"
+                        f"{ref!r} is not among the documents this run loaded, so it "
+                        f"cannot be checked or reformatted -- confirm it is right"
                     ),
                 ))
+                continue
+            for field_name in fmt.required_document_fields:
+                if not document.get(field_name):
+                    violations.append(Violation(
+                        kind="incomplete_reference", severity="warning",
+                        line=_line_of(content, ref),
+                        message=(
+                            f"{ref!r} has no {field_name}, so it cannot be cited in "
+                            f"the required form"
+                        ),
+                    ))
 
     if declared is not None:
         declared_set = set(declared)
@@ -273,18 +290,18 @@ def check_references(
                     message=f"{ref!r} is cited in the body but missing from source_refs",
                 ))
         for ref in sorted(declared_set - set(body_refs)):
-            # Retrieved but not quoted is provenance, not a leftover. Reading a
+            # Loaded but not quoted is provenance, not a leftover. Reading a
             # wiki page also returns the raw reports it was distilled from, and
             # declaring those is exactly what the provenance rule asks for --
             # warning about it would be the kind of noise that teaches people
             # to skip warnings.
-            if retrieved_set is not None and ref in retrieved_set:
+            if corpus is not None and ref in corpus:
                 continue
             violations.append(Violation(
                 kind="unused_declaration", severity="warning",
                 message=(
                     f"{ref!r} is in source_refs but was neither cited in the body "
-                    f"nor retrieved during this run -- usually a leftover from an "
+                    f"nor loaded during this run -- usually a leftover from an "
                     f"earlier draft"
                 ),
             ))

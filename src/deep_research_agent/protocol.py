@@ -31,6 +31,7 @@ __all__ = [
     "AgentRequest",
     "AgentResponse",
     "Citation",
+    "RetrievedDocument",
     "Usage",
     "AgentError",
     "AgentSpec",
@@ -194,6 +195,33 @@ class Citation:
     ref: str
     title: str = ""
     snippet: str = ""
+
+
+@dataclass(frozen=True, slots=True)
+class RetrievedDocument:
+    """A document this run actually loaded, kept with its content.
+
+    ``Citation`` records *that* something was read and is what the final
+    answer points at. This records *what was read* — the body, and whatever
+    the source knew about it. They are separate because they are consumed by
+    different things: a citation is for the reader of the report, a retrieved
+    document is for anything that has to work on the corpus afterwards.
+
+    The reference checker is the first such consumer: formatting a citation
+    needs the document's title and date, and telling an agent "this source has
+    no date, so it cannot be cited in the required form" needs the document
+    itself, not a note that it was seen.
+    """
+
+    ref: str
+    kind: Literal["wiki_page", "raw_report", "external_url", "internal_record"]
+    title: str = ""
+    content: str = ""
+    metadata: dict[str, Any] = field(default_factory=dict)
+    """Whatever the source supplied — published date, author, namespace. Left
+    open because each source knows different things, and forcing them into a
+    common shape here would mean guessing which fields matter before anything
+    consumes them."""
 
 
 @dataclass(frozen=True, slots=True)

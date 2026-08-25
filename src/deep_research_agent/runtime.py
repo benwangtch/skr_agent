@@ -25,6 +25,7 @@ skills; it is the wrong one for a mandatory format spec.
 
 from __future__ import annotations
 
+import hashlib
 import json
 import logging
 import re
@@ -44,12 +45,16 @@ from deep_research_agent.protocol import (
     Citation,
     Denied,
     Principal,
+    RetrievedDocument,
     Usage,
 )
 
 log = logging.getLogger(__name__)
 
-__all__ = ["ToolContext", "ToolBundle", "ToolsetFactory", "SubagentFactory", "DeepAgent"]
+__all__ = [
+    "ToolContext", "ToolBundle", "ToolsetFactory", "SubagentFactory", "DeepAgent",
+    "fingerprint",
+]
 
 
 @dataclass
@@ -58,18 +63,68 @@ class ToolContext:
 
     Tools receive the principal here rather than as a tool argument, so a
     model cannot claim a different identity than the one it is running under.
-    They also get a citation sink: a tool that reads a record or fetches an
-    article records where the content came from, so the runtime can attach
-    provenance to the final answer without the model having to remember to.
+
+    They also get two sinks, which look similar and are not:
+
+    ``citations``
+        *That* something was read. This is what the final answer points at,
+        so the runtime can attach provenance without the model remembering to.
+
+    ``documents``
+        *What* was read — the body of every source this run loaded, kept for
+        the length of the request. This is the corpus anything working on the
+        research afterwards needs: formatting a citation requires the
+        document's title and date, and saying "this source has no date, so it
+        cannot be cited in the required form" requires the document itself.
+
+    Both are shared with subagents, because they are populated through the
+    same tool objects. An investigator's ``fetch_article`` therefore puts the
+    article into the lead's corpus, which is what lets a check run at the end
+    of a delegated sweep see everything the sweep read.
     """
 
     principal: Principal
     request: AgentRequest
     citations: list[Citation] = field(default_factory=list)
+    documents: list[RetrievedDocument] = field(default_factory=list)
+    approvals: set[str] = field(default_factory=set)
+    """Fingerprints of content a required pre-publish check has passed.
+
+    A gate the model can talk its way past is not a gate, so "I checked this"
+    is recorded as a fingerprint of the exact text that passed rather than as
+    a claim. ``wiki/tools.py`` fingerprints what it is asked to write and
+    refuses when it is absent. See ``core/reference_tools.py``.
+    """
 
     def cite(self, citation: Citation) -> None:
         if citation not in self.citations:
             self.citations.append(citation)
+
+    def record(self, document: RetrievedDocument) -> None:
+        """Add a loaded document to the corpus, newest wins on a re-read."""
+        self.documents = [d for d in self.documents if d.ref != document.ref]
+        self.documents.append(document)
+
+    def document(self, ref: str) -> RetrievedDocument | None:
+        return next((d for d in self.documents if d.ref == ref), None)
+
+    def approve(self, content: str) -> None:
+        self.approvals.add(fingerprint(content))
+
+    def is_approved(self, content: str) -> bool:
+        return fingerprint(content) in self.approvals
+
+
+def fingerprint(content: str) -> str:
+    """Identify a draft by its text, ignoring incidental whitespace.
+
+    Normalising trailing whitespace keeps an approval from being invalidated
+    by a reformatting that changes nothing a reader would see. Anything more
+    aggressive would let an edited draft inherit an approval it never earned,
+    which is the whole thing this exists to prevent.
+    """
+    normalised = "\n".join(line.rstrip() for line in content.strip().splitlines())
+    return hashlib.sha256(normalised.encode("utf-8")).hexdigest()
 
 
 ToolBundle = Sequence[BaseTool]

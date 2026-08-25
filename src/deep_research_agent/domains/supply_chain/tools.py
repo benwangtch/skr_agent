@@ -19,7 +19,7 @@ from dataclasses import asdict
 from langchain_core.tools import BaseTool, StructuredTool
 
 from deep_research_agent.capabilities import lookup, search
-from deep_research_agent.protocol import Citation
+from deep_research_agent.protocol import Citation, RetrievedDocument
 from deep_research_agent.runtime import ToolBundle, ToolContext
 from deep_research_agent.domains.supply_chain.sources import BomSource, NewsFeed
 
@@ -51,7 +51,17 @@ def make_bom_toolset(bom: BomSource):
                     title=f"BOM entry: {company.name}",
                 )
             )
-            return str(asdict(company))
+            record = asdict(company)
+            ctx.record(
+                RetrievedDocument(
+                    ref=f"bom/{company.company_id}",
+                    kind="internal_record",
+                    title=f"BOM entry: {company.name}",
+                    content=str(record),
+                    metadata=record,
+                )
+            )
+            return str(record)
 
         tools: list[BaseTool] = [
             # Discovers: it is how you find out which companies exist at all.
@@ -119,6 +129,22 @@ def make_news_toolset(feed: NewsFeed):
                     ref=article.url,
                     title=article.title,
                     snippet=article.summary[:200],
+                )
+            )
+            # The whole article, not the snippet: a reference formatter needs
+            # the publication date and outlet, and a checker asked whether a
+            # source can be cited in the required form needs to look.
+            ctx.record(
+                RetrievedDocument(
+                    ref=article.url,
+                    kind="external_url",
+                    title=article.title,
+                    content=article.summary,
+                    metadata={
+                        "source": article.source,
+                        "published": article.published,
+                        "companies": list(article.companies),
+                    },
                 )
             )
             return (

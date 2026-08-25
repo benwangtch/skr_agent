@@ -31,13 +31,17 @@ from langchain_core.tools import BaseTool
 from deep_research_agent.capabilities import lookup_tools, read_only_tools, select_read_only
 from deep_research_agent.core.domain import Specialist
 from deep_research_agent.core.prompt import FINDINGS_DIR
-from deep_research_agent.core.reference_tools import REFERENCE_TOOL_NAME
+from deep_research_agent.core.reference_tools import (
+    REFERENCE_TOOL_NAME,
+    authority_names,
+)
 
 __all__ = [
     "core_subagents",
     "GENERAL_PURPOSE_PROMPT",
     "FACT_CHECKER_PROMPT",
-    "REFERENCE_CHECKER_PROMPT",
+    "REFERENCE_CHECKER_BASE",
+    "reference_checker_prompt",
 ]
 
 
@@ -93,18 +97,17 @@ useless, because it will be trusted.\
 """
 
 
-REFERENCE_CHECKER_PROMPT = """\
-You are given a draft whose references have already been checked mechanically
-by the `check_references` tool, and a list of the defects it found. Your job is
-to work through that list and hand back a specific fix for each one — not to
-re-do the detection.
+REFERENCE_CHECKER_BASE = """\
+You check that a finished draft attaches its references in the required
+format, and you hand back a specific fix for each defect. You do not check
+whether the sources support the claims — that is the fact-checker's job, and
+duplicating it wastes a turn.
 
-Start by running `check_references` on the draft yourself, so you are working
-from the current list rather than a stale one.
+Start by running the reference tools you have on the draft, so you are working
+from the current list of defects rather than a stale one.
 
-**The tool is exact. You are not.** It parses the draft and compares every
-reference against what this run actually retrieved. Do not argue with a
-finding because the draft reads as though it is sourced, and do not decide a
+**The tools are exact. You are not.** They parse the draft. Do not argue with
+a finding because the draft reads as though it is sourced, and do not decide a
 section "obviously" has a reference somewhere. The one thing worth your
 judgement is whether a violation is a parser artefact — a reference inside a
 code block or a table cell that the pattern read as prose. Say so explicitly
@@ -112,14 +115,14 @@ when you think that is what happened, and say why.
 
 For each defect, decide which of these applies and say so:
 
-- **Missing reference, recoverable** — the source was retrieved during this
-  run and just was not cited. Name the exact reference to add and where.
-- **Missing reference, unrecoverable** — nothing retrieved supports the claim.
+- **Missing reference, recoverable** — a source this run loaded supports the
+  claim and just was not cited. Name the exact reference to add and where.
+- **Missing reference, unrecoverable** — nothing loaded supports the claim.
   The fix is to drop the claim, not to attach the nearest plausible source.
   Say which sentence has to go.
-- **Ungrounded reference** — cited but never retrieved. This is the serious
-  one: it means the reference was written from memory. Say to remove it, and
-  whether a genuinely retrieved source could replace it.
+- **Malformed or unresolvable** — the reference is there but not in the
+  required shape, or points at something this run never loaded. Say what the
+  corrected form is, or that it needs confirming.
 - **Parser artefact** — the draft is fine and the pattern misfired. Explain
   which construct confused it.
 
@@ -130,6 +133,32 @@ Write the full defect-by-defect analysis to a file and reply with a SHORT
 summary: how many defects, how many need a claim dropped, and the file path.
 Finish with an overall verdict of PASS (nothing left to fix) or REVISE.\
 """
+
+
+def reference_checker_prompt(authorities: Sequence[str] = ()) -> str:
+    """The checker's prompt, naming whichever reference tools it was given.
+
+    A deployment may supply its own reference authority (a house-style linter,
+    a citation formatter). Which one applies is resolved in the wiring and
+    stated here, rather than left to the subagent to go looking: a model told
+    to "check whether a better tool exists" sometimes concludes it does not,
+    and a run that silently fell back to the generic format is wrong in a way
+    nobody notices.
+    """
+    if not authorities:
+        return REFERENCE_CHECKER_BASE + (
+            "\n\nThis deployment has no reference tool of its own, so "
+            f"`{REFERENCE_TOOL_NAME}` is the authority on the required format."
+        )
+    named = ", ".join(f"`{name}`" for name in authorities)
+    return REFERENCE_CHECKER_BASE + (
+        f"\n\nThis deployment supplies its own reference tooling: {named}. "
+        f"**That is the authority on the required format** -- where it and "
+        f"`{REFERENCE_TOOL_NAME}` disagree about shape, it wins. Keep using "
+        f"`{REFERENCE_TOOL_NAME}` as well: it is the one that knows the "
+        "section structure and the publish call's source_refs, and publishing "
+        "stays blocked until the draft passes it."
+    )
 
 
 def core_subagents(
@@ -186,7 +215,7 @@ def core_subagents(
             # Same lookup set as the fact-checker: it confirms that a
             # reference it proposes adding actually resolves.
             "tools": checker_tools,
-            "system_prompt": REFERENCE_CHECKER_PROMPT,
+            "system_prompt": reference_checker_prompt(authority_names(checker_tools)),
         })
 
     for specialist in specialists:
