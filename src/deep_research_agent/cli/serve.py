@@ -31,6 +31,7 @@ import argparse
 import asyncio
 import logging
 
+from deep_research_agent.cli.preflight import warn_about_llm
 from deep_research_agent.config import get_paths
 from deep_research_agent.serving import run
 
@@ -55,6 +56,10 @@ def main(argv: list[str] | None = None) -> int:
         level=logging.INFO if args.verbose else logging.WARNING,
         format="%(levelname)s %(name)s %(message)s",
     )
+
+    # A warning, not a refusal: the server builds no model client until a task
+    # arrives, and a deployment may inject the key after the container starts.
+    warn_about_llm()
 
     paths = get_paths()
     asyncio.run(

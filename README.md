@@ -189,6 +189,18 @@ for a checkout marker and falls back to the working directory. Set
 `PATHS_PROJECT_ROOT` (where `skills/` lives) and `PATHS_FIXTURES` when neither
 applies.
 
+Use `uv run python -m …` (or `.venv/bin/python -m …`). This is a `src/`
+layout, so the package is not under the repo root — a bare `python3 -m
+deep_research_agent` from the root reports `No module named
+deep_research_agent`, meaning "that interpreter doesn't have this installed",
+not that anything is broken.
+
+Exit codes: `0` succeeded, `1` ran but did not succeed, `2` misconfigured and
+never started. A missing `LLM_API_KEY` is caught before any work happens and
+reported in this repo's own variable names — otherwise it surfaces as a
+provider traceback telling you to set `OPENAI_API_KEY`, which is the wrong
+advice here.
+
 Each of the above needs real `LLM_API_KEY` credentials and calls the model —
 see [`docs/RUNBOOK.md`](docs/RUNBOOK.md) §3 for what to expect from each one
 and how to confirm it actually worked (which namespace a report landed in,
@@ -198,7 +210,7 @@ scheduler survive running together).
 ## Test
 
 ```bash
-uv run pytest              # 252 tests, no credentials required
+uv run pytest              # 260 tests, no credentials required
 ```
 
 Coverage: namespace authorization, clearance-gated namespaces, the

@@ -434,7 +434,7 @@ await asyncio.gather(
 ## 8. 測試策略
 
 ```
-252 個測試，全部不需要金鑰、不呼叫模型
+260 個測試，全部不需要金鑰、不呼叫模型
   test_wiring.py      55   tool 清單、subagent 邊界、deep research 結構、報告取回、skill 載入、import 風格
   test_wiki_authz.py  32   namespace 授權、clearance、aggregation leak
   test_a2a_server.py  32   executor 生命週期 + 6 個走真 handler/HTTP 的整合測試
@@ -444,7 +444,7 @@ await asyncio.gather(
   test_observability.py 19  Langfuse 設定、降級、trace metadata、MCP 標記
   test_mcp.py         17   設定解析、降級、對真的 MCP server 載入/呼叫/citation
   test_mesh.py        15   agent-as-tool 的 principal 綁定、citation 傳遞
-  test_cli.py         17   四個入口都 import 得起來、path 解析（含 checkout 外）
+  test_cli.py         25   四個入口都 import 得起來、path 解析（含 checkout 外）、啟動前的設定檢查
 ```
 
 三個刻意的選擇：

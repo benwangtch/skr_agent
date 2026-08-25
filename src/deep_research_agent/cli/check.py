@@ -32,15 +32,13 @@ def check_llm(probe: bool) -> list[str]:
     print(f"{INFO} base_url : {llm.resolved_base_url() or '(provider default)'}")
     print(f"{INFO} model    : {llm.resolved_model() or '(none)'}")
 
-    if not llm.api_key.get_secret_value():
-        print(f"{BAD} LLM_API_KEY is empty -- the agent will fail at startup.")
-        problems.append("LLM_API_KEY not set")
-    else:
-        print(f"{OK} LLM_API_KEY is set")
-
-    if llm.provider == "custom" and not llm.model:
-        print(f"{BAD} LLM_PROVIDER=custom needs LLM_MODEL (no default for an unknown host).")
-        problems.append("LLM_MODEL not set for provider=custom")
+    # The same rules the entry points refuse to start on -- kept in the config
+    # class so this check and that refusal cannot disagree.
+    for problem in llm.problems():
+        print(f"{BAD} {problem}")
+        problems.append(problem)
+    if not problems:
+        print(f"{OK} credentials and endpoint look usable")
 
     if not probe:
         print(f"{WARN} not contacting the model (pass --llm to actually try it)")

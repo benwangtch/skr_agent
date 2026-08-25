@@ -28,7 +28,7 @@ src/deep_research_agent/
     serve.py                           同時跑 A2A server + 排程
     check.py                           花 token 前先驗設定（有問題 exit 1）
 fixtures/                              4 家公司、5 頁 wiki（namespace: supply / platform / shared）、4 份原始週報
-tests/                                 252 個測試，10 個檔案，全部不需要金鑰
+tests/                                 260 個測試，10 個檔案，全部不需要金鑰
 ```
 
 入口點在**套件裡面**不是 `examples/`——它們不是示範，是這個東西實際的跑法，而且容器要的是「裝好」不是「clone 下來」。四個指令共用一個 dispatcher：
@@ -40,6 +40,10 @@ uv run python -m deep_research_agent.cli.ask --help   # 單獨跑也可以，等
 ```
 
 從 checkout 以外的地方跑（容器、別的目錄下的 cron）不用給參數：project root 會往上找 checkout 標記，找不到就退回工作目錄。兩者都不適用時設 `PATHS_PROJECT_ROOT`（`skills/` 在哪）和 `PATHS_FIXTURES`。
+
+**一個常見的絆腳石**：這是 `src/` layout，所以套件不在 repo 根目錄底下。在根目錄直接打 `python3 -m deep_research_agent` 會說 `No module named deep_research_agent`——這跟入口點搬家無關，是「那個 python 沒裝這個套件」。用 `uv run python -m ...`（或 `.venv/bin/python -m ...`）就對了。
+
+exit code 三個值：`0` 成功、`1` 跑了但沒成功、`2` 設定有問題還沒開始跑。腳本可以靠這個分辨「我設定錯了」跟「研究沒成功」。
 
 **兩種部署形態共用同一個 agent**，差別只有 `build_mesh(domain=...)`：排程跑的是已知任務（掛 domain），使用者問的是未知任務（`domain=None`）。詳見 DESIGN §3.4。
 
@@ -79,7 +83,7 @@ uv run python -c "from deep_research_agent.config import get_llm; l=get_llm(); p
 uv run python -m deep_research_agent check
 ```
 
-它會印出 provider、base_url、model、金鑰有沒有設、每個 MCP server 連不連得上以及它給了哪些 tool、載了哪些 skill、還有哪些 skill 放在資料夾裡但沒被載入。有問題就 exit code 1，所以也可以拿來當部署前的 gate。
+它會印出 provider、base_url、model、金鑰有沒有設、每個 MCP server 連不連得上以及它給了哪些 tool、載了哪些 skill、還有哪些 skill 放在資料夾裡但沒被載入。有問題就 exit code 1，所以也可以拿來當部署前的 gate。`ask` / `report` 在開跑前也會做同一組 LLM 檢查（不過的話 exit 2），檢查規則放在 `config/llm.py::problems()`，兩邊不會各說各話。
 
 **設定看起來對 ≠ endpoint 真的活著。** 要真的打一次模型（花費可忽略，但這是唯一能證明 base_url + 金鑰真的能用的方法）：
 
@@ -94,7 +98,7 @@ MCP 連不上時預設只印一行結論，加 `-v` 才會印底層的例外（h
 ## 2. 跑單元測試（不花錢、不用金鑰）
 
 ```bash
-uv run pytest              # 252 個測試，約 18 秒
+uv run pytest              # 260 個測試，約 18 秒
 uv run pytest -q tests/test_wiki_authz.py     # 只跑某個檔案
 uv run pytest -k aggregation                  # 只跑名字符合的測試
 ```
@@ -104,7 +108,7 @@ uv run pytest -k aggregation                  # 只跑名字符合的測試
 | `test_wiki_authz.py`（32） | namespace 授權、clearance-gated namespace、aggregation leak 檢查 |
 | `test_mesh.py`（15） | agent-as-tool 的 principal 綁定、citation 傳遞、拒絕處理 |
 | `test_wiring.py`（55） | 每個 agent 的 tool 清單、沒有 subagent 能發布（兩種部署形態都驗）、fact-checker 沒有 search tool、scratchpad/停止條件/矛盾處理有進 prompt、import 風格 |
-| `test_cli.py`（17） | 四個入口都 import 得起來且 `--help` 能跑、project root/fixtures 的解析（含從 checkout 以外的目錄） |
+| `test_cli.py`（25） | 四個入口都 import 得起來且 `--help` 能跑、project root/fixtures 的解析（含從 checkout 以外的目錄）、設定不全時給一行人話而不是 traceback |
 | `test_general_agent.py`（24） | 沒有 domain 也是完整形態、domain 只能加不能放寬規則、tool 能力宣告與 fail-closed 預設 |
 | `test_config.py`（22） | LLM config 的 provider 預設值、env var 覆蓋、chat model 建構 |
 | `test_scheduler.py`（19） | cron 排程時序、job 失敗互不影響、hook 觸發 |
@@ -132,7 +136,18 @@ uv run python -m deep_research_agent report --dry-run --tier critical
 - 輸出最後有 `--- citations ---` 區塊，列出至少一個 `external_url`（新聞）和一個 `wiki_page`/`raw_report`（因為 agent 應該會去 wiki 交叉比對既有記錄）
 - 因為 `--dry-run`，不會真的寫 wiki，最後不會印 `wiki namespaces now: ...`
 
-若這步失敗（例如 `LLM_API_KEY` 沒填或 gateway 連不上），錯誤會是 provider client 的連線／認證訊息。注意 key 沒填的話會在**建立 agent 的當下**就報錯，不是跑到一半才失敗——這代表問題在 §1 的 config，不在後面的邏輯。
+`LLM_API_KEY` 沒填的話，會在**做任何事之前**擋下來並 exit 2：
+
+```
+Cannot start:
+  - LLM_API_KEY is empty and LLM_PROVIDER=openrouter requires a key
+
+Run `python -m deep_research_agent check` for the full picture.
+```
+
+這是刻意攔的。不攔的話，你會拿到一段從 provider SDK 裡冒出來的 traceback，結尾寫著「set the OPENAI_API_KEY environment variable」——在這個 repo 裡那是**錯的建議**，變數叫 `LLM_API_KEY`，而且打的可能根本不是 OpenAI。
+
+gateway 連得到但拒絕請求（金鑰錯、model 名字錯）仍然會是 provider 的訊息，那類問題只有真的打一次才知道——用 `check --llm`。
 
 ### 3.2 使用者觸發：產出一份報告並存檔
 
@@ -435,7 +450,7 @@ print('prompt chars:', len(p))
 - A2A server 跟排程可以在同一個 process 穩定跑，外部呼叫走得通（3.6）
 - （若有設定）MCP tool 載得到、模型會用、而且留下 `mcp://` citation（3.7）
 
-這六步涵蓋了 `docs/design/DESIGN.md` §9 列出的「已知限制」之外的核心行為。**沒有自動化的 e2e 測試**（§2 的 252 個測試都用 stub，不叫真的模型）——這是刻意的，因為每次 CI 跑都花 token、還會因為模型輸出的隨機性讓測試不穩定。真要把 §3 這幾步自動化，做法是寫一支跑在 CI 之外（例如手動觸發或排程跑一次）的 smoke test script，判準改成寬鬆的（例如「有沒有 citations」而不是「內容逐字符合」）——這份文件目前先提供人工跑過一遍的步驟，還沒做那支腳本。
+這六步涵蓋了 `docs/design/DESIGN.md` §9 列出的「已知限制」之外的核心行為。**沒有自動化的 e2e 測試**（§2 的 260 個測試都用 stub，不叫真的模型）——這是刻意的，因為每次 CI 跑都花 token、還會因為模型輸出的隨機性讓測試不穩定。真要把 §3 這幾步自動化，做法是寫一支跑在 CI 之外（例如手動觸發或排程跑一次）的 smoke test script，判準改成寬鬆的（例如「有沒有 citations」而不是「內容逐字符合」）——這份文件目前先提供人工跑過一遍的步驟，還沒做那支腳本。
 
 ## 5. 常見卡住的地方
 

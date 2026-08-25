@@ -82,6 +82,33 @@ class LLM(BaseConfig):
             )
         return self
 
+    def problems(self) -> list[str]:
+        """Why a run would fail, in terms of *this repo's* variable names.
+
+        Without this the first sign of a missing key is a provider traceback
+        ending in "set the OPENAI_API_KEY environment variable" — advice that
+        is actively wrong here, since the key is ``LLM_API_KEY`` and may be
+        going to a completely different host.
+
+        ``custom`` is exempt from the key check on purpose: a local vLLM or
+        Ollama gateway legitimately needs no credential, and refusing to start
+        against one would be the same mistake in the other direction.
+        """
+        found: list[str] = []
+        if self.provider != 'custom' and not self.api_key.get_secret_value():
+            found.append(
+                f"LLM_API_KEY is empty and LLM_PROVIDER={self.provider} requires a key"
+            )
+        if self.provider == 'custom':
+            if not self.resolved_model():
+                found.append("LLM_PROVIDER=custom needs LLM_MODEL (no default for an unknown host)")
+            if not self.resolved_base_url():
+                found.append(
+                    "LLM_PROVIDER=custom needs LLM_BASE_URL -- without it requests "
+                    "go to the OpenAI SDK's own default host, not your gateway"
+                )
+        return found
+
     def resolved_base_url(self) -> str | None:
         return self.base_url or _BASE_URLS.get(self.provider)
 

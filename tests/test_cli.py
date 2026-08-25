@@ -93,3 +93,81 @@ class TestPathResolution:
         reset_settings_cache()
         roots = [str(r) for r in skill_roots(get_paths().resolved_project_root())]
         assert str(tmp_path.resolve() / "skills") in roots
+
+
+class TestStartupRefusesInsteadOfCrashing:
+    """A missing key used to surface as a provider traceback ending in "set
+    the OPENAI_API_KEY environment variable" -- wrong advice, since the
+    variable here is LLM_API_KEY and the host may not be OpenAI at all."""
+
+    def test_a_missing_key_is_reported_in_this_repos_terms(self, monkeypatch, capsys):
+        from deep_research_agent.cli.preflight import require_llm
+
+        monkeypatch.setenv("LLM_PROVIDER", "openrouter")
+        monkeypatch.setenv("LLM_API_KEY", "")
+        reset_settings_cache()
+
+        with pytest.raises(SystemExit) as exit:
+            require_llm()
+        assert exit.value.code == 2
+
+        err = capsys.readouterr().err
+        assert "LLM_API_KEY" in err
+        assert "OPENAI_API_KEY" not in err
+
+    def test_misconfiguration_and_failure_have_different_exit_codes(self, monkeypatch):
+        """2 is "you configured it wrong"; 1 is "it ran and did not succeed".
+        A script driving these needs to tell them apart."""
+        from deep_research_agent.cli.preflight import require_llm
+
+        monkeypatch.setenv("LLM_API_KEY", "")
+        reset_settings_cache()
+        with pytest.raises(SystemExit) as exit:
+            require_llm()
+        assert exit.value.code == 2
+
+    def test_a_configured_provider_passes(self, monkeypatch):
+        from deep_research_agent.cli.preflight import require_llm
+
+        monkeypatch.setenv("LLM_API_KEY", "sk-test")
+        reset_settings_cache()
+        require_llm()  # must not raise
+
+    def test_the_server_warns_but_does_not_refuse(self, monkeypatch, capsys):
+        """It builds no model client until a task arrives, and a deployment
+        may inject the key after the container starts."""
+        from deep_research_agent.cli.preflight import warn_about_llm
+
+        monkeypatch.setenv("LLM_API_KEY", "")
+        reset_settings_cache()
+        warn_about_llm()  # must not raise
+        assert "LLM_API_KEY" in capsys.readouterr().err
+
+
+class TestWhichConfigurationsCountAsBroken:
+    def test_a_local_gateway_may_legitimately_need_no_key(self, monkeypatch):
+        """vLLM and Ollama take no credential. Refusing to start against one
+        would be the same mistake in the other direction."""
+        from deep_research_agent.config.llm import LLM
+
+        config = LLM(provider="custom", api_key="", base_url="http://vllm:8000/v1", model="q")
+        assert config.problems() == []
+
+    def test_custom_without_a_base_url_is_caught(self, monkeypatch):
+        """Otherwise requests silently go to the OpenAI SDK's default host
+        instead of the internal gateway -- a confusing way to fail."""
+        from deep_research_agent.config.llm import LLM
+
+        problems = LLM(provider="custom", model="q", base_url=None).problems()
+        assert any("LLM_BASE_URL" in p for p in problems)
+
+    def test_custom_without_a_model_is_caught(self):
+        from deep_research_agent.config.llm import LLM
+
+        problems = LLM(provider="custom", base_url="http://x/v1", model=None).problems()
+        assert any("LLM_MODEL" in p for p in problems)
+
+    def test_a_hosted_provider_with_a_key_is_fine(self):
+        from deep_research_agent.config.llm import LLM
+
+        assert LLM(provider="openrouter", api_key="sk-x").problems() == []

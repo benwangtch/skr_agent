@@ -21,6 +21,7 @@ import logging
 from pathlib import Path
 
 from deep_research_agent import Budget, build_mesh
+from deep_research_agent.cli.preflight import require_llm
 from deep_research_agent.config import get_paths
 from deep_research_agent.mcp import mcp_toolset_from_config
 from deep_research_agent.observability import flush
@@ -55,6 +56,7 @@ def parser() -> argparse.ArgumentParser:
 
 
 async def run(args: argparse.Namespace) -> int:
+    require_llm()  # one actionable line beats a provider traceback
     paths = get_paths()
 
     mcp_toolset = await mcp_toolset_from_config()
