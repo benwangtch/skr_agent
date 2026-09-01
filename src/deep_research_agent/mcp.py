@@ -23,6 +23,16 @@ this module needs to grow a per-request client to carry it. Until then, only
 connect servers whose whole contents the *least* privileged caller of this
 agent is allowed to see.
 
+**Capability is declared, never inferred.** The MCP protocol says nothing
+about whether a tool writes, so an arriving tool is undeclared, and
+``capabilities.py`` reads undeclared as mutating. The practical effect is that
+an MCP tool is offered to the top-level agent and to nobody else — not the
+researcher subagents, not the reference checker. When a tool really is
+read-only, the operator says so in ``MCP_CAPABILITIES`` and it starts reaching
+subagents. It is configuration rather than a rule in code because it is a
+claim about someone else's service: ``search_*`` is a naming convention, and
+guessing from it would put an undeclared mutation behind the fact-checker.
+
 What this module does add is provenance: each MCP tool is wrapped so that
 calling it records a ``Citation``, the same way reading a wiki page does. An
 agent told to source every claim needs something to point at, and
@@ -36,6 +46,7 @@ from typing import Any, Sequence
 
 from langchain_core.tools import BaseTool, StructuredTool
 
+from deep_research_agent.capabilities import lookup, mutating, search
 from deep_research_agent.config import get_mcp
 from deep_research_agent.config.mcp import MCP
 from deep_research_agent.protocol import Citation
@@ -46,12 +57,22 @@ log = logging.getLogger(__name__)
 __all__ = ["load_mcp_tools", "make_mcp_toolset", "mcp_toolset_from_config"]
 
 
-def _wrap_with_citation(tool: BaseTool, server: str, ctx: ToolContext) -> BaseTool:
+_DECLARE = {"lookup": lookup, "search": search, "mutating": mutating}
+
+
+def _wrap_with_citation(
+    tool: BaseTool, server: str, ctx: ToolContext, capability: str | None = None
+) -> BaseTool:
     """Return a tool that behaves like ``tool`` but records where data came from.
 
     The wrapper keeps the original name, description and argument schema, so
     the model sees exactly the tool the MCP server advertised — only the
     provenance bookkeeping is added.
+
+    ``capability`` is the operator's declaration from ``MCP_CAPABILITIES``.
+    ``None`` leaves the tool undeclared, which ``capabilities.py`` reads as
+    mutating — so the tool stays on the top-level agent and out of every
+    subagent. That is the safe default, not a bug to work around here.
     """
 
     async def _call(**kwargs: Any) -> Any:
@@ -66,7 +87,7 @@ def _wrap_with_citation(tool: BaseTool, server: str, ctx: ToolContext) -> BaseTo
         )
         return result
 
-    return StructuredTool.from_function(
+    wrapped = StructuredTool.from_function(
         coroutine=_call,
         name=tool.name,
         description=tool.description,
@@ -77,6 +98,11 @@ def _wrap_with_citation(tool: BaseTool, server: str, ctx: ToolContext) -> BaseTo
         # question a trace should answer.
         metadata={"tool_source": "mcp", "mcp_server": server},
     )
+    # Declared after construction so the capability keys are merged into the
+    # provenance metadata rather than replacing it -- both end up on the same
+    # dict, and losing either one is a silent failure.
+    declare = _DECLARE.get(capability or "")
+    return declare(wrapped) if declare else wrapped
 
 
 async def load_mcp_tools(config: MCP | None = None) -> list[tuple[str, BaseTool]]:
@@ -112,16 +138,43 @@ async def load_mcp_tools(config: MCP | None = None) -> list[tuple[str, BaseTool]
     return loaded
 
 
-def make_mcp_toolset(tools: Sequence[tuple[str, BaseTool]]) -> ToolsetFactory:
+def make_mcp_toolset(
+    tools: Sequence[tuple[str, BaseTool]], config: MCP | None = None
+) -> ToolsetFactory:
     """Wrap already-loaded MCP tools as a ``ToolsetFactory``.
 
     Takes what ``load_mcp_tools`` returns. Split from loading so the network
     round trip happens once at startup while the factory stays synchronous and
     per-request, which is what ``DeepAgent`` expects.
+
+    Capability declarations are resolved here, once, rather than inside the
+    per-request factory: they come from configuration that cannot change
+    between requests, and resolving them once gives somewhere to log the
+    outcome without repeating it on every call.
     """
+    config = config or get_mcp()
+    declared = {
+        (server, tool.name): config.capability_of(server, tool.name)
+        for server, tool in tools
+    }
+
+    undeclared = sorted(f"{s}/{n}" for (s, n), level in declared.items() if level is None)
+    if undeclared:
+        log.info(
+            "mcp.undeclared tools=%s -- treated as mutating, so they are "
+            "available to the top-level agent only. Declare read-only ones in "
+            "MCP_CAPABILITIES to let subagents use them.",
+            undeclared,
+        )
+    for (server, name), level in sorted(declared.items()):
+        if level is not None:
+            log.info("mcp.capability server=%s tool=%s level=%s", server, name, level)
 
     def factory(ctx: ToolContext) -> ToolBundle:
-        return [_wrap_with_citation(tool, server, ctx) for server, tool in tools]
+        return [
+            _wrap_with_citation(tool, server, ctx, declared[(server, tool.name)])
+            for server, tool in tools
+        ]
 
     return factory
 
@@ -133,7 +186,8 @@ async def mcp_toolset_from_config(config: MCP | None = None) -> ToolsetFactory |
     from "configured but the server exposed nothing", which are different
     problems.
     """
+    config = config or get_mcp()
     tools = await load_mcp_tools(config)
     if not tools:
         return None
-    return make_mcp_toolset(tools)
+    return make_mcp_toolset(tools, config)

@@ -129,6 +129,20 @@ triggering user's identity is **not** forwarded to the MCP server, so every
 call arrives as the same service account. `docs/RUNBOOK.md` §3.7 has the
 verification steps; `DESIGN.md` §5.5 has the full caveat.
 
+An MCP tool arrives with no statement of whether it writes, so it is treated
+as mutating and offered to the top-level agent only — no subagent gets it.
+Name the read-only ones in `MCP_CAPABILITIES` to let researchers and the
+reference checker use them:
+
+```
+MCP_CAPABILITIES={"search_wiki_pages":"search","get_wiki_page":"lookup"}
+```
+
+`search` reaches researching subagents, `lookup` also reaches the reference
+checker, and anything unlisted stays where it is. It is configuration rather
+than a guess from the tool's name because it is a claim about a service this
+repo does not control.
+
 To add a **skill** (a rubric the agent must follow every run): if you
 maintain it elsewhere, point `SKILLS_PATH` at the directory holding it and
 name it in `SKILLS_ENABLED` — no code change, and no copy to drift from the

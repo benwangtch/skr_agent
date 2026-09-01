@@ -79,6 +79,42 @@ class TestConfig:
         assert "s3cret" not in repr(config)
 
 
+class TestCapabilityDeclarations:
+    """Which MCP tools a subagent may be handed. Undeclared means unsafe."""
+
+    def test_nothing_declared_by_default(self):
+        assert MCP().capability_of("wiki", "search_wiki_pages") is None
+
+    def test_a_bare_tool_name_matches_any_server(self):
+        config = MCP(capabilities={"search_wiki_pages": "search"})
+        assert config.capability_of("wiki", "search_wiki_pages") == "search"
+        assert config.capability_of("other", "search_wiki_pages") == "search"
+
+    def test_a_qualified_name_beats_a_bare_one(self):
+        """Two servers exporting the same tool name is the reason the
+        qualified form exists; if it lost, declaring one would declare both."""
+        config = MCP(
+            capabilities={"search": "mutating", "wiki/search": "search"}
+        )
+        assert config.capability_of("wiki", "search") == "search"
+        assert config.capability_of("tickets", "search") == "mutating"
+
+    def test_an_undeclared_tool_stays_undeclared(self):
+        config = MCP(capabilities={"search_wiki_pages": "search"})
+        assert config.capability_of("wiki", "write_wiki_page") is None
+
+    def test_a_misspelt_level_is_rejected_rather_than_ignored(self):
+        """Silently ignoring it would fail closed, which looks exactly like
+        forgetting the entry -- a tool missing from a subagent with no reason
+        given anywhere."""
+        with pytest.raises(ValueError, match="read-only|unknown capability"):
+            MCP(capabilities={"search_wiki_pages": "read-only"})
+
+    def test_the_error_names_the_levels_that_do_work(self):
+        with pytest.raises(ValueError, match="lookup"):
+            MCP(capabilities={"x": "readonly"})
+
+
 def connections_header(config: MCP) -> str:
     return config.connections()["mcp"]["headers"]["Authorization"]
 
@@ -153,9 +189,10 @@ class TestAgainstARealServer:
         assert "acme" in str(await tool.ainvoke({"supplier_id": "acme"}))
         assert "nordwind" in str(await tool.ainvoke({"supplier_id": "nordwind"}))
 
-    async def test_mcp_tools_reach_the_agent_surface_but_not_the_subagent(self):
-        """MCP tools mount on the main agent only: nothing tells us which of
-        them mutate state, and the investigator is read-only by construction."""
+    async def test_an_undeclared_mcp_tool_reaches_the_agent_but_no_subagent(self):
+        """The default. Nothing in the MCP protocol says whether a tool
+        mutates, so an undeclared one is treated as if it does, and the
+        investigator is read-only by construction."""
         from deep_research_agent import build_mesh
 
         root = Path(__file__).resolve().parent.parent
@@ -167,6 +204,103 @@ class TestAgainstARealServer:
 
         assert "get_supplier_risk_score" in {t.name for t in tools}
         assert "get_supplier_risk_score" not in {t.name for t in subagents[0]["tools"]}
+
+    async def test_a_tool_declared_search_reaches_researching_subagents(self):
+        """The point of the declaration. A read-only MCP source is useless to
+        this agent if only the lead can call it -- the specialists are where
+        the research actually happens."""
+        from deep_research_agent import build_mesh
+        from deep_research_agent.capabilities import is_read_only
+
+        root = Path(__file__).resolve().parent.parent
+        config = stdio_config(capabilities={"get_supplier_risk_score": "search"})
+        toolset = await mcp_toolset_from_config(config)
+        mesh = build_mesh(
+            fixtures=root / "fixtures", project_root=root, extra_toolsets=[toolset]
+        )
+        tools, subagents = mesh.agent.build_tools(context())
+        by_name = {t.name: t for t in tools}
+
+        assert is_read_only(by_name["get_supplier_risk_score"])
+        researcher = next(s for s in subagents if s["name"] == "general-purpose")
+        assert "get_supplier_risk_score" in {t.name for t in researcher["tools"]}
+
+    async def test_search_is_still_withheld_from_the_reference_checker(self):
+        """A checker that can search stops checking and starts researching --
+        it "confirms" a claim from a source the report never cited. Declaring a
+        tool `search` must not buy a way around that."""
+        from deep_research_agent import build_mesh
+
+        root = Path(__file__).resolve().parent.parent
+        config = stdio_config(capabilities={"get_supplier_risk_score": "search"})
+        toolset = await mcp_toolset_from_config(config)
+        mesh = build_mesh(
+            fixtures=root / "fixtures", project_root=root, extra_toolsets=[toolset]
+        )
+        _, subagents = mesh.agent.build_tools(context())
+        checker = next(s for s in subagents if s["name"] == "reference-checker")
+        assert "get_supplier_risk_score" not in {t.name for t in checker["tools"]}
+
+    async def test_a_tool_declared_lookup_reaches_the_reference_checker(self):
+        """`lookup` is the narrowest level and the only one the checker gets:
+        fetching a named thing cannot turn into going and finding new material."""
+        from deep_research_agent import build_mesh
+
+        root = Path(__file__).resolve().parent.parent
+        config = stdio_config(capabilities={"get_supplier_risk_score": "lookup"})
+        toolset = await mcp_toolset_from_config(config)
+        mesh = build_mesh(
+            fixtures=root / "fixtures", project_root=root, extra_toolsets=[toolset]
+        )
+        _, subagents = mesh.agent.build_tools(context())
+        checker = next(s for s in subagents if s["name"] == "reference-checker")
+        assert "get_supplier_risk_score" in {t.name for t in checker["tools"]}
+
+    async def test_declaring_a_tool_mutating_keeps_it_off_every_subagent(self):
+        """Saying it out loud must land in the same place as saying nothing."""
+        from deep_research_agent import build_mesh
+
+        root = Path(__file__).resolve().parent.parent
+        config = stdio_config(capabilities={"get_supplier_risk_score": "mutating"})
+        toolset = await mcp_toolset_from_config(config)
+        mesh = build_mesh(
+            fixtures=root / "fixtures", project_root=root, extra_toolsets=[toolset]
+        )
+        tools, subagents = mesh.agent.build_tools(context())
+        assert "get_supplier_risk_score" in {t.name for t in tools}
+        for subagent in subagents:
+            assert "get_supplier_risk_score" not in {t.name for t in subagent["tools"]}
+
+    async def test_declaring_one_tool_does_not_declare_its_neighbour(self):
+        """Per tool, not per server. A server that exports one safe tool and
+        one dangerous one is the normal case."""
+        from deep_research_agent.capabilities import is_read_only
+
+        config = stdio_config(capabilities={"get_supplier_risk_score": "search"})
+        toolset = await mcp_toolset_from_config(config)
+        by_name = {t.name: t for t in toolset(context())}
+        assert is_read_only(by_name["get_supplier_risk_score"])
+        assert not is_read_only(by_name["list_open_audits"])
+
+    async def test_the_provenance_metadata_survives_the_declaration(self):
+        """Both sets of metadata keys live on one dict; an earlier version of
+        this wrote capability over the top of `mcp_server` and the trace lost
+        which server a call went to."""
+        config = stdio_config(capabilities={"get_supplier_risk_score": "search"})
+        toolset = await mcp_toolset_from_config(config)
+        tool = {t.name: t for t in toolset(context())}["get_supplier_risk_score"]
+        assert tool.metadata["mcp_server"] == "supplier-risk"
+        assert tool.metadata["tool_source"] == "mcp"
+        assert tool.metadata["mutates"] is False
+
+    async def test_a_declared_tool_still_records_a_citation(self):
+        """Declaring capability must not cost provenance."""
+        ctx = context()
+        config = stdio_config(capabilities={"get_supplier_risk_score": "search"})
+        toolset = await mcp_toolset_from_config(config)
+        tool = {t.name: t for t in toolset(ctx)}["get_supplier_risk_score"]
+        await tool.ainvoke({"supplier_id": "acme-semi"})
+        assert ctx.citations[0].ref == "mcp://supplier-risk/get_supplier_risk_score"
 
     async def test_the_agent_still_has_its_own_sources(self):
         """Adding MCP must not displace the built-in data sources."""
