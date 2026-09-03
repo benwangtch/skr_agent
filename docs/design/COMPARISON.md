@@ -17,46 +17,76 @@
 
 所以下面的對照分兩層：
 
-1. **§1 對 nanobot**：範圍很窄，只有一個經過驗證的差異點。誠實講清楚它有多窄。
+1. **§1 對 nanobot**：查過的只有 skill 載入這一條，而**那一條我們原本記錯了，方向還是反的**——nanobot 在這一點上內建了我們手工搭出來的東西。這一節現在的內容主要是更正。
 2. **§2–§8 對 v1**：這才是實質的部分，因為 v1 是同一批人在同一個問題上的前一次嘗試。
 
 ---
 
-## 1. 對 nanobot：一個驗證過的差異點
+## 1. 對 nanobot：這一項我們原本記錯了，而且方向是反的
 
-### 1.1 查證了什麼
+> **這一節推翻了先前的記錄。** 舊 `00-architecture.md` §7（以及這份文件的第一版）說「當初不選 nanobot 是因為它的 skill 載入是 progressive disclosure」。去讀了原始碼之後：**那個說法是錯的。**
 
-當時去讀了 `nanobot/agent/skills.py` 的原始碼，不是只讀 README。結論：
+### 1.1 名詞先定義：inline 到底是什麼
 
-| | nanobot | 這套實作 |
+框架把 `SKILL.md` 交給模型有兩種方式，差別在**誰決定要不要讀**：
+
+| | 機制 | 失敗模式 |
 |---|---|---|
-| `SKILL.md` 檔案格式 | 相容 | 相容 |
-| 載入機制 | **progressive disclosure**：把「name + description + 路徑」的摘要放進 context，模型要看全文得**自己用 file read tool 去讀** | 必要的規範**直接 inline 進 system prompt**，harness 保證它在 context 裡 |
+| progressive disclosure | system prompt 只放 `name + description + 路徑`，模型自己判斷要不要 `read_file` 拿本文 | 模型判斷「不需要讀」，而且安靜地發生 |
+| 保證注入（inline） | 完整內文直接放進 system prompt | 佔 context |
 
-### 1.2 為什麼這個差異對 deep research 有影響
+`skills/incident-report/SKILL.md` 裝的是**嚴重度量表**和 **provenance 規則**——性質是「每次執行都必須遵守」，不是「需要時去查」。交給模型決定，等於把一個必然要求變成一次擲骰。
 
-`skills/incident-report/SKILL.md` 裝的是**嚴重度評級的量表**和**provenance 規則**。這種東西的性質是「每一次執行都必須遵守」，不是「需要時去查」。
+失敗長什麼樣：一趟沒讀量表就評級的執行，輸出完全正常——格式對、語氣對、每家公司都有一個 severity。錯的只有那個 severity 憑什麼是那個值，而**那件事沒有人會發現**。長流程更糟：跑到第 18 家公司時，模型早就不記得 context 開頭那份摘要提過有個檔案可以讀。
 
-progressive disclosure 的失敗模式是**模型判斷自己不需要讀**——而它安靜地發生。一趟沒讀量表就評級的執行，輸出看起來完全正常：格式對、語氣對、每家公司都有一個 severity。錯的只有那個 severity 憑什麼是那個值，而那件事沒有人會發現。
+### 1.2 nanobot 內建保證注入
 
-這在長流程裡更糟。跑到第 18 家公司時，模型早就不記得 context 開頭那份摘要提過有個檔案可以讀。
+`nanobot/agent/context.py:135-139`：
 
-### 1.3 這個判斷後來又用了一次
+```python
+active_skills = self.skills.get_always_skills()
+if active_skills:
+    active_content = self.skills.load_skills_for_context(active_skills)
+    if active_content:
+        parts.append(f"# Active Skills\n\n{active_content}")
+```
 
-換到 `deepagents` 之後同樣的問題再出現：`create_deep_agent(skills=...)` **也是** progressive disclosure。所以做了同樣的判斷、採取同樣的對策——inline。
+`load_skills_for_context()` 放進去的是 `_strip_frontmatter(markdown)`，也就是**完整內文**。觸發條件是 `SKILL.md` frontmatter 寫 `always: true`。下一行 `build_skills_summary(exclude=set(active_skills))` 把它從摘要裡排掉，不會重複列。
 
-值得記下來的是這代表**當初沒選 nanobot 的理由不是「nanobot 比較差」**，而是「skill 載入該不該靠模型自己記得去讀」這個判斷；同一個判斷在新框架上一樣成立，我們只是自己補掉了框架的行為。
+`get_always_skills()` 在 **nanobot 第一個 commit（`d4cc48af`, 2026-02-01）就存在**，比我們評估的時間（2026-08-02）早六個月。所以不是「後來才加的」——**是當初那次查證看漏了**：它讀到同一個檔案裡的 `build_skills_summary`，認定那就是載入機制，沒往下看 `get_always_skills` / `load_skills_for_context`。
 
-**取捨講清楚**：inline 是「規範必須每次遵守」時的正確選擇。當 optional skill 變多（十幾二十個各自適用不同任務），progressive disclosure 才是對的——那時 context 塞不下，讓模型挑反而正確。目前的規模不到那裡。
+### 1.3 deepagents 沒有這個東西（這半邊是對的）
 
-### 1.4 這個對照的邊界（重要）
+`deepagents/middleware/skills.py` 的 docstring：
 
-**當初那次查證停在讀原始碼，沒有實跑一次驗證「觸發 → 載入 → 執行」全鏈路。** 所以：
+> Loads skills from backend sources and injects them into the system prompt using progressive disclosure (metadata first, full content on demand).
 
-- §1.1 那格「載入機制」是讀原始碼得到的，可信。
-- 除此之外，這份文件**不對 nanobot 的其他能力（記憶、多 agent 拓撲、MCP 整合、可觀測性）做任何比較宣稱**——沒有查證就沒有依據。
+frontmatter 接受 `name` / `description` / `license` / `compatibility` / `metadata` / `allowed_tools`——**沒有 `always` 之類的欄位**。
 
-如果要對外用這份對照，§1 只能用到這裡為止。要更完整就得補一次實跑。
+我們的「inline」因此是**繞過去**，不是改框架：不用 `skills=` 參數，自己讀檔、去掉 frontmatter、串進 `create_deep_agent(system_prompt=...)`。見 `runtime.py:15-23`、`load_skill()`。
+
+### 1.4 所以這一項的結論
+
+| | 保證注入 | 怎麼做到 |
+|---|---|---|
+| nanobot | ✅ 內建 | frontmatter `always: true` |
+| deepagents | ❌ 沒有 | 不用 `skills=`，自己組 system prompt 字串 |
+
+**在這個軸上 nanobot 的預設比 deepagents 好。** 我們選了 deepagents，所以這件事得自己補。「因為 skill 載入機制而不選 nanobot」這個理由不成立。
+
+還站得住的是**設計規則本身**，而它跟框架無關：
+
+> 必須每次遵守的規範，不能靠模型自己記得去讀。
+
+在 nanobot 上是設一個旗標，在 deepagents 上是自己組字串——兩邊都得**明確做這件事**，差別只在成本。任何能讓你控制 system prompt 的框架都做得到，所以這從來就不是選框架的依據。
+
+**取捨仍然要講清楚**：保證注入是「規範必須每次遵守」時的正確選擇。當 optional skill 變多（十幾二十個各自適用不同任務），progressive disclosure 才是對的——那時 context 塞不下，讓模型挑反而正確。目前的規模不到那裡。
+
+### 1.5 這個對照的邊界
+
+**這份文件不對 nanobot 的其他能力（記憶、多 agent 拓撲、MCP 整合、可觀測性）做任何比較宣稱。** 查過的只有 skill 載入這一條。
+
+而 §1.2 本身就是這個邊界的教訓：**上一次「查過了」的結論，是讀了一個函式就推廣到整個機制。** 同一個檔案裡就有反例。要對外用這份對照，nanobot 的部分只能用到這裡為止；要更完整，就得真的把 nanobot 跑起來，而不是再讀一次原始碼。
 
 ---
 
@@ -239,6 +269,6 @@ v1 沒有。現在整趟執行進 Langfuse：每個 tool call、MCP call、subag
 
 ## 12. 如果只能記三件事
 
-1. **框架選擇不是差異來源。** nanobot / Claude Agent SDK / `deepagents` 都給 agent loop 和委派；研究品質是 §2–§7 那批決定堆出來的。真正跟框架有關的只有一件事——§1 那個「規範不該靠模型自己記得去讀」，而它在兩個框架上都得自己補。
+1. **框架選擇不是差異來源。** nanobot / Claude Agent SDK / `deepagents` 都給 agent loop 和委派；研究品質是 §2–§7 那批決定堆出來的。§1 那條規則（規範不該靠模型自己記得去讀）是**設計判斷不是框架能力**——nanobot 用一個 frontmatter 旗標達成，deepagents 得自己組 prompt 字串，兩邊都做得到。
 2. **這類 agent 的錯誤是安靜的。** 沒讀量表的評級、被摘要掉的 citation、subagent 悄悄拿到寫入權、正確草稿被誤報——沒有一個會拋例外。所以設計的重點反覆是同一句：**把安靜的失敗變成吵的失敗**（fail closed、publish gate、parser 而非模型、對實際生效的清單做驗證）。
-3. **不變式要對著實際生效的東西驗。** §5.1 那個洞在測試全綠的情況下存在，因為測試驗的是我們宣告的清單，不是框架實際組出來的那個。
+3. **不變式要對著實際生效的東西驗。** §5.1 那個洞在測試全綠的情況下存在，因為測試驗的是我們宣告的清單，不是框架實際組出來的那個。**§1.2 是同一個錯誤的另一種形狀**：讀了一個函式就當成整個機制，而反例就在同一個檔案裡。「查證過」不等於「查完了」。
