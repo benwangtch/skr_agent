@@ -5,7 +5,7 @@
 
 這份文件描述系統**現在的樣子**，是唯一一份架構參考。先前有三份按時間累積、彼此重疊又開始互相矛盾的設計文件，已經合併進這裡並刪除。演進過程在 git log 裡，這裡只講結論。
 
-操作手冊（怎麼跑、怎麼驗證）在 [`../RUNBOOK.md`](../RUNBOOK.md)。套件管理在 [`package-management.md`](package-management.md)。
+操作手冊（怎麼跑、怎麼驗證）在 [`../RUNBOOK.md`](../RUNBOOK.md)。套件管理在 [`package-management.md`](package-management.md)。跟 nanobot 與本 repo 第一版（v1）的對照在 [`COMPARISON.md`](COMPARISON.md)——那份講「差在哪」，這份講「為什麼」。
 
 ---
 
