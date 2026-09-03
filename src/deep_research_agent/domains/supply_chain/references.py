@@ -39,7 +39,7 @@ from deep_research_agent.core.references import (
     ReferenceFormat,
     Violation,
 )
-from deep_research_agent.wiki.routes import page_url, ref_from_url
+from deep_research_agent.wiki.routes import canonical, page_url, ref_from_url
 
 __all__ = [
     "SUPPLY_CHAIN_FORMAT",
@@ -146,14 +146,18 @@ SUPPLY_CHAIN_RULES = (markdown_links_only, no_raw_reports_in_body)
 
 
 def canonical_ref(extracted: str) -> str:
-    """A wiki link target back to ``namespace/slug``; anything else unchanged.
+    """A wiki link target or short ref folded to one canonical form; anything
+    else unchanged.
 
-    Once sources are rendered as links, the parser finds the target rather
-    than the reference. Without this the check would report a correctly cited
-    page as a URL matching nothing in ``source_refs``, which is the worst kind
-    of defect report: one that is wrong about a draft that is right.
+    Two things have to meet here. Once sources are rendered as links, the
+    parser finds the target rather than the reference — so a URL maps back to
+    a ref. And a ref may be written short (``supply/acme``) or long
+    (``supply/pages/acme``), which are the same page. Without both, the check
+    reports a correctly cited page as matching nothing in ``source_refs``,
+    which is the worst kind of defect report: one that is wrong about a draft
+    that is right.
     """
-    return ref_from_url(extracted) or extracted
+    return ref_from_url(extracted) or canonical(extracted)
 
 
 SUPPLY_CHAIN_FORMAT = dataclasses.replace(DEFAULT_FORMAT, normalise_ref=canonical_ref)

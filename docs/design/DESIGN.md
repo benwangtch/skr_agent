@@ -247,7 +247,11 @@ link 文字取自 **retrieval store 裡文件的名字**（tool 回傳的那個�
 
 `ResearchDomain.reference_rules` 是 domain 加規則的方式，`ReferenceRule` 拿到草稿和一個已經解析好的 context，回傳 violations。跟 `reference_format` 一樣是加法，不能放寬 core 的檢查。
 
-**實跑時才發現的問題：一旦來源變成 markdown link，parser 找到的是 link target 不是 ref。** wiki 頁被正確引用成 `[名字](https://wiki/.../supply/acme)` 之後，抽出來的是那串 URL，跟 `source_refs` 裡的 `supply/acme` 對不起來——checker 會對一份完全正確的草稿報錯。所以 `ReferenceFormat` 多了 `normalise_ref`，供應鏈用 `ref_from_url()` 把 wiki URL 映回 `namespace/slug`，而且**正規化發生在去重之前**（同一頁一次寫成 link 一次寫成裸 ref 是同一個來源）。
+**實跑時才發現的問題：一旦來源變成 markdown link，parser 找到的是 link target 不是 ref。** wiki 頁被正確引用成 `[名字](https://wiki/.../supply/pages/acme)` 之後，抽出來的是那串 URL，跟 `source_refs` 裡的 `supply/acme` 對不起來——checker 會對一份完全正確的草稿報錯。所以 `ReferenceFormat` 多了 `normalise_ref`，供應鏈用 `ref_from_url()` 把 wiki URL 映回 ref，而且**正規化發生在去重之前**（同一頁一次寫成 link 一次寫成裸 ref 是同一個來源）。**兩邊都要正規化**：`source_refs` 也走同一個函式，否則拿正規化過的集合去比對沒正規化的集合，同樣會對正確的草稿報錯。
+
+**路由帶 kind：`{namespace}/{kind}/{name}`。** 目前只有 `pages` 有服務，`raw`（頁面所依據的原始檔）保留。kind 一開始就在路由裡而不是之後補，是因為兩段式路由在 raw 檔跟頁面同名的那一刻就會有歧義，而那時歧義已經寫進既存的 ref 裡了。
+
+*URL* 一定寫出 kind；*ref* 不必——`supply/acme` 和 `supply/pages/acme` 是同一頁，`canonical()` 把它們收斂到**短的**那個，因為省略 kind 本來就代表 `pages`。其他 kind 保留（`supply/raw/spec.pdf` 非留不可）。收斂到短的而不是長的，是因為 corpus、檢索存放區和 fixtures 全都以短形式為 key——往另一個方向收斂等於為了講一件已經隱含的事去重新 key 這三個東西。外部來源（MCP wiki 搜尋）用 `page_ref(namespace, name)` 組 ref，不要自己拼字串。
 
 這類問題單元測試抓不到，因為單元測試餵的是手寫的草稿。抓到它的是把 generator 產出接進 checker 跑一次——現在那條性質有測試守著：**generator 產出的東西，checker 一定接受**。這兩者一旦不一致，agent 會在兩個 tool 之間來回而永遠收斂不了。
 

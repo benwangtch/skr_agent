@@ -27,7 +27,7 @@ from deep_research_agent.domains.supply_chain.references import (
 from deep_research_agent.principals import user_principal
 from deep_research_agent.protocol import AgentRequest
 from deep_research_agent.runtime import ToolContext
-from deep_research_agent.wiki.routes import page_url, ref_from_url
+from deep_research_agent.wiki.routes import canonical, page_ref, page_url, ref_from_url
 
 ROOT = Path(__file__).resolve().parent.parent
 
@@ -189,6 +189,62 @@ class TestLinkTargetsMapBackToReferences:
             f"- **Sources:** {format_reference(PAGE, CORPUS)}\n"
         )
         assert list(check(draft).references).count(PAGE) == 1
+
+
+class TestTheRouteCarriesAKind:
+    """``{namespace}/{kind}/{name}``. Only ``pages`` is served today; ``raw``
+    is reserved so refs written now survive it arriving."""
+
+    def test_a_page_url_states_the_kind(self):
+        assert page_url(PAGE).endswith("/supply/pages/acme-semiconductor")
+
+    def test_that_url_maps_back_to_the_short_ref(self):
+        """Short is canonical for pages, because that is what the corpus, the
+        retrieval store and the fixtures are all keyed by."""
+        assert ref_from_url(page_url(PAGE)) == PAGE
+
+    def test_both_spellings_of_a_page_are_one_reference(self):
+        assert canonical("supply/pages/acme") == canonical("supply/acme") == "supply/acme"
+
+    def test_an_explicit_page_ref_produces_the_same_url(self):
+        assert page_url("supply/pages/acme") == page_url("supply/acme")
+
+    def test_a_raw_ref_keeps_its_kind(self):
+        """Dropping it would make supply/raw/spec.pdf collide with the page
+        named spec.pdf -- which is the whole reason the segment exists."""
+        assert canonical("supply/raw/spec.pdf") == "supply/raw/spec.pdf"
+        assert page_url("supply/raw/spec.pdf").endswith("/supply/raw/spec.pdf")
+
+    def test_a_raw_url_and_a_page_url_do_not_map_to_the_same_ref(self):
+        assert ref_from_url(page_url("supply/raw/acme")) != ref_from_url(page_url("supply/acme"))
+
+    def test_an_unknown_second_segment_is_part_of_the_name(self):
+        """Treating any second segment as a kind would silently rewrite page
+        names that contain a slash."""
+        assert canonical("supply/notakind/x") == "supply/notakind/x"
+        assert page_url("supply/notakind/x").endswith("/supply/pages/notakind/x")
+
+    def test_an_article_url_is_not_mistaken_for_a_ref(self):
+        """The bug this guards: split on '/' alone reads https://news.test/x
+        as namespace 'https:', and canonical then rewrites the article URL."""
+        assert canonical(ARTICLE) == ARTICLE
+        assert page_url(ARTICLE) is None
+
+    def test_page_ref_builds_what_the_rest_of_the_code_expects(self):
+        """The seam for an MCP wiki search, which returns a namespace and a
+        page name rather than a ref."""
+        assert page_ref("supply", "acme-semiconductor") == PAGE
+        assert page_ref("supply", "spec.pdf", kind="raw") == "supply/raw/spec.pdf"
+
+    def test_a_page_declared_short_and_cited_long_still_cross_checks(self):
+        """Both sides of the source_refs comparison go through the same
+        normalisation. Without it, a correctly cited page reads as missing."""
+        draft = (
+            f"### Acme — critical\n- **What:** x.\n"
+            f"- **Sources:** {format_reference(PAGE, CORPUS)}\n"
+        )
+        report = check(draft, declared=["supply/pages/acme-semiconductor", RAW])
+        assert report.violations == (), report.render()
 
 
 class TestItIsWiredIntoTheDomain:

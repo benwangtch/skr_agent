@@ -328,7 +328,17 @@ def check_references(
                     ))
 
     if declared is not None:
-        declared_set = set(declared)
+        # Both sides go through the same normalisation before being compared.
+        # body_refs are already normalised (above), and a format that maps link
+        # targets back to references also folds equivalent spellings of one
+        # reference together -- so comparing a normalised set against a raw one
+        # would report a missing source for a page cited exactly right.
+        normalise = fmt.normalise_ref or (lambda ref: ref)
+        # Normalised -> as the caller wrote it. Messages name the form the
+        # caller can act on; a canonical spelling they never typed reads like a
+        # complaint about a different reference.
+        declared_by_norm = {normalise(ref): ref for ref in declared}
+        declared_set = set(declared_by_norm)
         if not declared_set:
             violations.append(Violation(
                 kind="no_declared_sources", severity="error",
@@ -342,18 +352,19 @@ def check_references(
                     message=f"{ref!r} is cited in the body but missing from source_refs",
                 ))
         for ref in sorted(declared_set - set(body_refs)):
+            original = declared_by_norm[ref]
             # Loaded but not quoted is provenance, not a leftover. Reading a
             # wiki page also returns the raw reports it was distilled from, and
             # declaring those is exactly what the provenance rule asks for --
             # warning about it would be the kind of noise that teaches people
             # to skip warnings.
-            if corpus is not None and ref in corpus:
+            if corpus is not None and (original in corpus or ref in corpus):
                 continue
             violations.append(Violation(
                 kind="unused_declaration", severity="warning",
                 message=(
-                    f"{ref!r} is in source_refs but was neither cited in the body "
-                    f"nor loaded during this run -- usually a leftover from an "
+                    f"{original!r} is in source_refs but was neither cited in the "
+                    f"body nor loaded during this run -- usually a leftover from an "
                     f"earlier draft"
                 ),
             ))
