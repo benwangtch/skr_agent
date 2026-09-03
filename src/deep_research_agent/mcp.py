@@ -41,6 +41,7 @@ agent told to source every claim needs something to point at, and
 
 from __future__ import annotations
 
+import json
 import logging
 from typing import Any, Sequence
 
@@ -49,8 +50,9 @@ from langchain_core.tools import BaseTool, StructuredTool
 from deep_research_agent.capabilities import lookup, mutating, search
 from deep_research_agent.config import get_mcp
 from deep_research_agent.config.mcp import MCP
-from deep_research_agent.protocol import Citation
+from deep_research_agent.protocol import Citation, RetrievedDocument
 from deep_research_agent.runtime import ToolBundle, ToolContext, ToolsetFactory
+from deep_research_agent.wiki.routes import page_ref
 
 log = logging.getLogger(__name__)
 
@@ -60,8 +62,101 @@ __all__ = ["load_mcp_tools", "make_mcp_toolset", "mcp_toolset_from_config"]
 _DECLARE = {"lookup": lookup, "search": search, "mutating": mutating}
 
 
+def _as_json(text: str) -> dict | None:
+    try:
+        parsed = json.loads(text)
+    except (json.JSONDecodeError, ValueError):
+        return None
+    return parsed if isinstance(parsed, dict) else None
+
+
+def _as_payload(result: Any) -> dict | None:
+    """The tool's dict, whichever way the adapter handed it over.
+
+    Three shapes are in play and which one you get depends on the versions of
+    ``langchain-mcp-adapters``, ``mcp`` and the server: an already-decoded
+    dict, a JSON string, or the raw MCP content blocks —
+    ``[{"type": "text", "text": "<json>"}]``, which is what this repo's own
+    fixture server produces today. Handling all three is not defensiveness:
+    the first version of this handled only the first two, and the symptom was
+    a search that recorded nothing at all, with no error anywhere.
+    """
+    if isinstance(result, dict):
+        return result
+    if isinstance(result, str):
+        return _as_json(result)
+    if isinstance(result, (list, tuple)):
+        for block in result:
+            text = block.get("text") if isinstance(block, dict) else getattr(block, "text", None)
+            if isinstance(text, str):
+                payload = _as_json(text)
+                if payload is not None:
+                    return payload
+    return None
+
+
+def _record_wiki_pages(result: Any, tool_name: str, ctx: ToolContext) -> None:
+    """Record a wiki-page search result in the run's corpus.
+
+    Only called for tools named in ``MCP_WIKI_PAGE_TOOLS``. A hit becomes a
+    ``RetrievedDocument`` under ``page_ref(namespace, page_name)`` so that the
+    reference formatter can build a wiki link for it — without this the agent
+    can read a page through MCP, cite it correctly, and still have the check
+    report the citation as matching nothing.
+
+    Nothing here raises. A tool that fails to parse has already returned its
+    result to the model, and taking the call down afterwards would lose that
+    for a bookkeeping problem. It does warn, though, and names the tool: a
+    listed tool contributing no documents is a broken assumption about
+    someone else's JSON, and the visible symptom otherwise is links silently
+    missing from a report.
+    """
+    payload = _as_payload(result)
+    hits = payload.get("hits") if isinstance(payload, dict) else None
+    if not isinstance(hits, list):
+        log.warning(
+            "mcp.wiki_pages_unparsed tool=%s -- it is named in "
+            "MCP_WIKI_PAGE_TOOLS but its result has no 'hits' list, so no "
+            "pages entered the corpus and citations to them will not resolve. "
+            "Check the tool's response shape.",
+            tool_name,
+        )
+        return
+
+    recorded = 0
+    for hit in hits:
+        if not isinstance(hit, dict):
+            continue
+        namespace, name = hit.get("namespace"), hit.get("page_name")
+        if not namespace or not name:
+            continue
+        ctx.record(
+            RetrievedDocument(
+                ref=page_ref(str(namespace), str(name)),
+                kind="wiki_page",
+                # The name as the source gave it. The reference formatter uses
+                # this verbatim as link text, which is the whole reason the
+                # document is stored rather than just cited.
+                title=str(name),
+                content=str(hit.get("content") or hit.get("description") or ""),
+                metadata={
+                    k: hit[k]
+                    for k in ("page_id", "namespace", "score", "update_datetime")
+                    if k in hit
+                },
+            )
+        )
+        recorded += 1
+
+    log.info("mcp.wiki_pages_recorded tool=%s pages=%d", tool_name, recorded)
+
+
 def _wrap_with_citation(
-    tool: BaseTool, server: str, ctx: ToolContext, capability: str | None = None
+    tool: BaseTool,
+    server: str,
+    ctx: ToolContext,
+    capability: str | None = None,
+    records_wiki_pages: bool = False,
 ) -> BaseTool:
     """Return a tool that behaves like ``tool`` but records where data came from.
 
@@ -85,6 +180,8 @@ def _wrap_with_citation(
                 snippet=str(kwargs)[:200],
             )
         )
+        if records_wiki_pages:
+            _record_wiki_pages(result, tool.name, ctx)
         return result
 
     wrapped = StructuredTool.from_function(
@@ -170,9 +267,25 @@ def make_mcp_toolset(
         if level is not None:
             log.info("mcp.capability server=%s tool=%s level=%s", server, name, level)
 
+    wiki_page_tools = set(config.wiki_page_tools)
+    missing = wiki_page_tools - {tool.name for _, tool in tools}
+    if missing:
+        log.warning(
+            "mcp.wiki_page_tools_missing tools=%s -- named in "
+            "MCP_WIKI_PAGE_TOOLS but no configured server exports them, so "
+            "nothing will enter the corpus under those names.",
+            sorted(missing),
+        )
+
     def factory(ctx: ToolContext) -> ToolBundle:
         return [
-            _wrap_with_citation(tool, server, ctx, declared[(server, tool.name)])
+            _wrap_with_citation(
+                tool,
+                server,
+                ctx,
+                declared[(server, tool.name)],
+                records_wiki_pages=tool.name in wiki_page_tools,
+            )
             for server, tool in tools
         ]
 

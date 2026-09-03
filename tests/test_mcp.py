@@ -16,6 +16,7 @@ from pathlib import Path
 
 import pytest
 
+from deep_research_agent.capabilities import is_read_only
 from deep_research_agent.config.mcp import MCP
 from deep_research_agent.mcp import load_mcp_tools, make_mcp_toolset, mcp_toolset_from_config
 from deep_research_agent.protocol import AgentRequest, Principal
@@ -178,7 +179,10 @@ class TestAgainstARealServer:
         wrapped = {t.name: t for t in make_mcp_toolset(loaded)(context())}
         assert set(original) == set(wrapped)
         for name, tool in original.items():
-            assert wrapped[name].description == tool.description
+            # Stripped: StructuredTool.from_function trims trailing whitespace
+            # off a multi-line docstring. That is not the model seeing a
+            # different tool, which is what this test is about.
+            assert wrapped[name].description.strip() == tool.description.strip()
             assert wrapped[name].args == tool.args
 
     async def test_two_calls_in_a_row_both_work(self):
@@ -301,6 +305,118 @@ class TestAgainstARealServer:
         tool = {t.name: t for t in toolset(ctx)}["get_supplier_risk_score"]
         await tool.ainvoke({"supplier_id": "acme-semi"})
         assert ctx.citations[0].ref == "mcp://supplier-risk/get_supplier_risk_score"
+
+    async def test_a_wiki_search_result_enters_the_corpus(self):
+        """Without this the agent can read a page through MCP, cite it
+        correctly, and still have the check report the citation as matching
+        nothing -- because the reference formatter has no title to use."""
+        ctx = context()
+        config = stdio_config(
+            capabilities={"search_wiki_pages": "search"},
+            wiki_page_tools=["search_wiki_pages"],
+        )
+        toolset = await mcp_toolset_from_config(config)
+        tool = {t.name: t for t in toolset(ctx)}["search_wiki_pages"]
+
+        await tool.ainvoke({"query": "acme"})
+
+        assert {d.ref for d in ctx.documents} == {
+            "supply/acme-semiconductor",
+            "supply/nordwind-logistics",
+        }
+
+    async def test_the_recorded_page_can_be_cited(self):
+        """End to end: what MCP returned goes through the same formatter the
+        wiki tools feed, and comes out as the house citation format."""
+        from deep_research_agent.domains.supply_chain.references import format_reference
+        from deep_research_agent.wiki.routes import page_url
+
+        ctx = context()
+        config = stdio_config(wiki_page_tools=["search_wiki_pages"])
+        toolset = await mcp_toolset_from_config(config)
+        await {t.name: t for t in toolset(ctx)}["search_wiki_pages"].ainvoke({"query": "acme"})
+
+        corpus = {d.ref: {"title": d.title, "kind": d.kind} for d in ctx.documents}
+        ref = "supply/acme-semiconductor"
+        assert format_reference(ref, corpus) == f"[acme-semiconductor]({page_url(ref)})"
+
+    async def test_the_link_text_is_the_name_the_wiki_gave(self):
+        """Not the model's paraphrase. Same rule as every other source."""
+        ctx = context()
+        config = stdio_config(wiki_page_tools=["search_wiki_pages"])
+        toolset = await mcp_toolset_from_config(config)
+        await {t.name: t for t in toolset(ctx)}["search_wiki_pages"].ainvoke({"query": "acme"})
+        assert ctx.document("supply/acme-semiconductor").title == "acme-semiconductor"
+
+    async def test_content_is_kept_not_just_the_reference(self):
+        ctx = context()
+        config = stdio_config(wiki_page_tools=["search_wiki_pages"])
+        toolset = await mcp_toolset_from_config(config)
+        await {t.name: t for t in toolset(ctx)}["search_wiki_pages"].ainvoke({"query": "acme"})
+        assert "two fabs" in ctx.document("supply/acme-semiconductor").content
+
+    async def test_a_hit_with_no_content_falls_back_to_its_description(self):
+        """An empty body would make the page unquotable; the description is
+        the most the source offered."""
+        ctx = context()
+        config = stdio_config(wiki_page_tools=["search_wiki_pages"])
+        toolset = await mcp_toolset_from_config(config)
+        await {t.name: t for t in toolset(ctx)}["search_wiki_pages"].ainvoke({"query": "acme"})
+        assert ctx.document("supply/nordwind-logistics").content == "Freight partner."
+
+    async def test_an_unlisted_tool_records_nothing(self):
+        """Opt-in. Reading a result means knowing its shape, so it happens
+        only where someone said the shape is known."""
+        ctx = context()
+        toolset = await mcp_toolset_from_config(stdio_config())
+        await {t.name: t for t in toolset(ctx)}["search_wiki_pages"].ainvoke({"query": "acme"})
+        assert ctx.documents == []
+
+    async def test_an_unlisted_tool_still_records_its_citation(self):
+        """Opting out of the corpus must not cost provenance."""
+        ctx = context()
+        toolset = await mcp_toolset_from_config(stdio_config())
+        await {t.name: t for t in toolset(ctx)}["search_wiki_pages"].ainvoke({"query": "acme"})
+        assert ctx.citations[0].ref == "mcp://supplier-risk/search_wiki_pages"
+
+    async def test_a_listed_tool_whose_shape_does_not_match_warns(self, caplog):
+        """The failure this guards: the service renames `hits`, nothing enters
+        the corpus, no error is raised, and the only symptom is links quietly
+        going missing from reports."""
+        import logging
+
+        ctx = context()
+        config = stdio_config(wiki_page_tools=["search_nothing_useful"])
+        toolset = await mcp_toolset_from_config(config)
+        with caplog.at_level(logging.WARNING):
+            await {t.name: t for t in toolset(ctx)}["search_nothing_useful"].ainvoke(
+                {"query": "x"}
+            )
+        assert ctx.documents == []
+        assert "search_nothing_useful" in caplog.text
+        assert "hits" in caplog.text
+
+    async def test_a_listed_tool_no_server_exports_is_reported_at_startup(self, caplog):
+        """A typo in the config would otherwise be indistinguishable from a
+        tool that simply never got called."""
+        import logging
+
+        config = stdio_config(wiki_page_tools=["serch_wiki_pages"])
+        with caplog.at_level(logging.WARNING):
+            await mcp_toolset_from_config(config)
+        assert "serch_wiki_pages" in caplog.text
+
+    async def test_recording_pages_is_independent_of_capability(self):
+        """They answer different questions -- 'may a subagent call this' and
+        'do I know how to read its output'. Coupling them would mean an
+        undeclared tool could not contribute sources."""
+        ctx = context()
+        config = stdio_config(wiki_page_tools=["search_wiki_pages"])
+        toolset = await mcp_toolset_from_config(config)
+        tools = {t.name: t for t in toolset(ctx)}
+        assert not is_read_only(tools["search_wiki_pages"])
+        await tools["search_wiki_pages"].ainvoke({"query": "acme"})
+        assert len(ctx.documents) == 2
 
     async def test_the_agent_still_has_its_own_sources(self):
         """Adding MCP must not displace the built-in data sources."""

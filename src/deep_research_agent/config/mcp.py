@@ -94,6 +94,31 @@ class MCP(BaseConfig):
     Anything unlisted stays mutating. See ``deep_research_agent.capabilities``
     for what each level may do."""
 
+    wiki_page_tools     : list[str]          = []
+    """MCP tools whose results are wiki pages, and should be recorded in the
+    run's corpus as such.
+
+    Opt-in by name, because reading a result means knowing its shape. A tool
+    listed here is expected to return (or return a JSON object containing) a
+    ``hits`` list whose entries carry ``namespace`` and ``page_name``, plus
+    optionally ``description`` and ``content`` — the shape
+    ``search_wiki_pages`` returns. Each hit becomes a ``RetrievedDocument``
+    keyed by ``page_ref(namespace, page_name)``, which is what lets the
+    reference formatter build a real wiki link for a page the agent found
+    through MCP rather than through this repo's own wiki tools.
+
+    Naming the tools rather than sniffing every result is deliberate: this is
+    a coupling to another service's JSON, and it should be visible in
+    configuration. When that service renames ``hits``, a listed tool that
+    parses to nothing logs a warning naming itself — the alternative is
+    citations quietly going missing from reports.
+
+    Anything unlisted is untouched: its result still reaches the model and
+    still records the ``mcp://`` citation, it just does not enter the corpus.
+
+        MCP_WIKI_PAGE_TOOLS=["search_wiki_pages"]
+    """
+
     def capability_of(self, server: str, tool: str) -> str | None:
         """The declared capability for one tool, or ``None`` if undeclared.
 
